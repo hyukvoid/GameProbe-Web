@@ -1,0 +1,161 @@
+import type { Metadata } from 'next'
+import Link from 'next/link'
+import { notFound } from 'next/navigation'
+import { DirectTestRecord, EmptyTests, ExternalReportRecord, StateLabel } from '@/components/evidence'
+import { IssueTable } from '@/components/issues'
+import { isIssue } from '@/lib/aggregate'
+import {
+  combine,
+  getGameBySlug,
+  listControllerCatalog,
+  listDirectTests,
+  listEvidenceItems,
+  listExternalReports,
+  listGames,
+  listVerificationRequests,
+  unverified,
+} from '@/lib/data/public'
+import { includeDemoData, requestDb } from '@/lib/db'
+import { CONTROL_SHORT } from '@/lib/domain'
+import { formatDate } from '@/lib/format'
+
+type Props = { params: Promise<{ game: string }> }
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const sql = await requestDb()
+  const game = await getGameBySlug(sql, (await params).game)
+  return { title: game ? `${game.name} controller compatibility` : 'Game not found' }
+}
+
+export default async function GamePage({ params }: Props) {
+  const sql = await requestDb()
+  const game = await getGameBySlug(sql, (await params).game)
+  if (!game) notFound()
+
+  const includeDemo = includeDemoData()
+  const scope = { includeDemo, gameId: game.id }
+  const [games, families, items, tests, reports, requests] = await Promise.all([
+    listGames(sql),
+    listControllerCatalog(sql),
+    listEvidenceItems(sql, scope),
+    listDirectTests(sql, { ...scope, limit: 30 }),
+    listExternalReports(sql, scope),
+    listVerificationRequests(sql, scope),
+  ])
+  const combos = combine(items).sort(
+    (a, b) => b.directTests - a.directTests || b.externalReports - a.externalReports,
+  )
+  const toVerify = unverified(combos, games, families)
+  const submitHref = `/submit?game=${game.slug}`
+
+  return (
+    <main id="main">
+      <div className="page-head">
+        <h1>{game.name}</h1>
+        {game.aliases.length > 0 && <p className="meta">Also searched as {game.aliases.join(', ')}</p>}
+        <div className="page-actions">
+          <Link href={submitHref}>Submit a test for {game.name}</Link>
+        </div>
+      </div>
+
+      <section className="first" aria-labelledby="controllers-heading">
+        <h2 id="controllers-heading">Controllers</h2>
+        {combos.length === 0 ? (
+          <EmptyTests href={submitHref} />
+        ) : (
+          <table className="stack">
+            <thead>
+              <tr>
+                <th scope="col">Controller</th>
+                <th scope="col" className="num">Direct tests</th>
+                <th scope="col" className="num">External reports</th>
+                <th scope="col">Reported issues</th>
+                <th scope="col">Last report</th>
+              </tr>
+            </thead>
+            <tbody>
+              {combos.map((c) => {
+                const family = families.find((f) => f.id === c.familyId)
+                if (!family) return null
+                const issues = c.summaries.filter(isIssue)
+                return (
+                  <tr key={c.familyId}>
+                    <td className="primary" data-label="Controller">
+                      <Link href={`/games/${game.slug}/${family.slug}`}>{family.name}</Link>
+                    </td>
+                    <td className="num" data-label="Direct tests">{c.directTests}</td>
+                    <td className="num" data-label="External reports">{c.externalReports}</td>
+                    <td data-label="Reported issues">
+                      {issues.length === 0 ? (
+                        <span className="muted">None reported</span>
+                      ) : (
+                        <ul className="results">
+                          {issues.map((s) => (
+                            <li key={s.control}>
+                              {CONTROL_SHORT[s.control]}: <StateLabel state={s.state} />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                    <td data-label="Last report" className="nowrap">{formatDate(c.lastDate)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+        <p className="section-note">
+          Not listed? Controllers appear here once a test or reviewed report exists.{' '}
+          <Link href={submitHref}>Submit a test</Link>
+        </p>
+      </section>
+
+      {(toVerify.length > 0 || requests.length > 0) && (
+        <section aria-labelledby="verify-heading">
+          <h2 id="verify-heading">Needs verification</h2>
+          {toVerify.length > 0 && <IssueTable rows={toVerify} caption="Needs verification" />}
+          {requests.length > 0 && (
+            <ul className="records">
+              {requests.map((r) => (
+                <ExternalReportRecord key={r.sourceId} report={r} />
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      <section aria-labelledby="direct-heading">
+        <h2 id="direct-heading">Direct tests</h2>
+        <p className="section-note">Submitted by people who tested the game with the controller, then reviewed.</p>
+        {tests.length > 0 ? (
+          <ul className="records">
+            {tests.map((t) => (
+              <DirectTestRecord key={t.id} test={t} />
+            ))}
+          </ul>
+        ) : (
+          <EmptyTests href={submitHref} />
+        )}
+      </section>
+
+      <section aria-labelledby="external-heading">
+        <h2 id="external-heading">External reports</h2>
+        <p className="section-note">
+          Found on other sites and reviewed by hand. Not tested by GameProbe. Conditions are only what the source states.
+        </p>
+        {reports.length > 0 ? (
+          <ul className="records">
+            {reports.map((r) => (
+              <ExternalReportRecord key={r.sourceId} report={r} />
+            ))}
+          </ul>
+        ) : (
+          <div className="empty">
+            <p>No reviewed external reports.</p>
+          </div>
+        )}
+      </section>
+    </main>
+  )
+}
