@@ -18,10 +18,14 @@ import { formatDate, plural } from '@/lib/format'
 export default async function Home() {
   const sql = await requestDb()
   const includeDemo = includeDemoData()
-  const [games, families, items, recent, requests] = await Promise.all([
+  // Two bounded waves: at most three page-data queries in flight, so the homepage never
+  // competes with itself for the connection pool.
+  const [games, families, items] = await Promise.all([
     listGames(sql),
     listControllerCatalog(sql),
     listEvidenceItems(sql, { includeDemo }),
+  ])
+  const [recent, requests] = await Promise.all([
     listDirectTests(sql, { includeDemo, limit: 6 }),
     listVerificationRequests(sql, { includeDemo }),
   ])
@@ -90,7 +94,7 @@ export default async function Home() {
             {requests.length > 0 && (
               <ul className="records">
                 {requests.map((r) => (
-                  <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} showGame />
+                  <ExternalReportRecord key={r.recordKey} report={r} showGame />
                 ))}
               </ul>
             )}

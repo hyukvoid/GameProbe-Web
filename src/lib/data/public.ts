@@ -261,6 +261,12 @@ export type ExternalReport = {
   connection: ConnectionType | null
   controllerMode: string | null
   isDemo: boolean
+  /**
+   * Stable identity for React keys and for the grouping below: source + family + the
+   * controller this record is about. Unique per record, so one source with two named
+   * controllers in the same family yields two keys.
+   */
+  recordKey: string
   claims: { control: EvidenceControl; result: Result; statement: string; connection: ConnectionType | null }[]
   missing: string[]
 }
@@ -291,9 +297,12 @@ type ClaimRow = {
 }
 
 /**
- * One record per source per controller. One source can cover several controllers (the
- * official HoYoverse list) or several transports, and a source that names no controller
- * at all still gets a record without a family instead of inventing one.
+ * One record per source per controller. Controller identity is the exact variant when one
+ * is known, otherwise the wording the source used, otherwise nothing: a source that names
+ * no controller stays a single record even when it states two transports, while two
+ * differently named controllers that normalize to the same family (Xbox Wireless
+ * Controller and Xbox Elite Wireless Controller Series 2, neither with a model number)
+ * stay two records.
  */
 async function listClaims(
   sql: Sql,
@@ -327,7 +336,8 @@ async function listClaims(
     }
   >()
   for (const r of rows) {
-    const key = `${r.source_id}|${r.family_slug ?? ''}`
+    const controllerIdentity = r.variant_id ?? r.controller_as_written ?? ''
+    const key = `${r.source_id}|${r.family_slug ?? ''}|${controllerIdentity}`
     let entry = byKey.get(key)
     if (!entry) {
       entry = {
@@ -349,6 +359,7 @@ async function listClaims(
           deviceModel: r.device_model_code,
           controllerMode: r.controller_mode,
           isDemo: r.is_demo,
+          recordKey: key,
           claims: [],
         },
         connections: [],

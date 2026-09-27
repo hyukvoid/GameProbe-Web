@@ -118,7 +118,7 @@ export default async function CombinationPage({ params }: Props) {
           <h2 id="verify-heading">Needs verification</h2>
           <ul className="records">
             {requests.map((r) => (
-              <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
+              <ExternalReportRecord key={r.recordKey} report={r} />
             ))}
           </ul>
         </section>
@@ -145,7 +145,7 @@ export default async function CombinationPage({ params }: Props) {
         {reports.length > 0 ? (
           <ul className="records">
             {reports.map((r) => (
-              <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
+              <ExternalReportRecord key={r.recordKey} report={r} />
             ))}
           </ul>
         ) : (

@@ -34,10 +34,14 @@ export default async function GamePage({ params }: Props) {
 
   const includeDemo = includeDemoData()
   const scope = { includeDemo, gameId: game.id }
-  const [games, families, items, tests, reports, requests] = await Promise.all([
+  // Two bounded waves, never more than three page-data queries at once: generateMetadata
+  // may run alongside this, and a single six-way Promise.all can saturate the pool.
+  const [games, families, items] = await Promise.all([
     listGames(sql),
     listControllerCatalog(sql),
     listEvidenceItems(sql, scope),
+  ])
+  const [tests, reports, requests] = await Promise.all([
     listDirectTests(sql, { ...scope, limit: 30 }),
     listExternalReports(sql, scope),
     listVerificationRequests(sql, scope),
@@ -118,7 +122,7 @@ export default async function GamePage({ params }: Props) {
           {requests.length > 0 && (
             <ul className="records">
               {requests.map((r) => (
-                <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
+                <ExternalReportRecord key={r.recordKey} report={r} />
               ))}
             </ul>
           )}
@@ -147,7 +151,7 @@ export default async function GamePage({ params }: Props) {
         {reports.length > 0 ? (
           <ul className="records">
             {reports.map((r) => (
-              <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
+              <ExternalReportRecord key={r.recordKey} report={r} />
             ))}
           </ul>
         ) : (

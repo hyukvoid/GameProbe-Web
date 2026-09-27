@@ -323,3 +323,111 @@ describe('controller_detected on a direct test', () => {
     expect(controller_detected).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// External report grouping: one record per source per controller.
+// ---------------------------------------------------------------------------
+
+describe('external report grouping', () => {
+  const scope = { includeDemo: false }
+  const xboxFamily = 'xbox-wireless-controller'
+  let named: string // one source naming two controllers of the same family
+  let unnamed: string // one source naming no controller, but two transports
+
+  beforeAll(async () => {
+    const game = id.game('genshin-impact').id
+    const [a] = await t.sql<{ id: string }[]>`
+      insert into evidence_sources (url, url_key, source_type, review_status, is_report, game_id)
+      values ('https://example.org/xbox-controllers', 'example.org/xbox-controllers', 'official', 'published', true, ${game})
+      returning id::text`
+    const [b] = await t.sql<{ id: string }[]>`
+      insert into evidence_sources (url, url_key, source_type, review_status, is_report, game_id)
+      values ('https://example.org/android-controller-support', 'example.org/android-controller-support', 'article', 'published', true, ${game})
+      returning id::text`
+    named = a.id
+    unnamed = b.id
+
+    const claim = (
+      source: string,
+      wording: string | null,
+      connection: string | null,
+      statement: string,
+    ) => t.sql`
+      insert into evidence_claims (
+        source_id, game_id, controller_family_id, controller_variant_id, controller_as_written,
+        android_version, connection_type, control, result, statement, visibility
+      )
+      select ${source}, ${game}, ${wording === null ? null : id.family(xboxFamily).id}, null, ${wording},
+             '9.0', ${connection}, 'controller_support', 'works', ${statement}, 'published'`
+
+    // Both normalize to the same family with a NULL variant: only the wording differs.
+    await claim(named, 'Xbox Wireless Controller', 'bluetooth', 'Controller support stated for Xbox Wireless Controller.')
+    await claim(
+      named,
+      'Xbox Elite Wireless Controller Series 2',
+      'bluetooth',
+      'Controller support stated for Xbox Elite Wireless Controller Series 2.',
+    )
+    // Family-less: the same subject over two transports.
+    await claim(unnamed, null, 'bluetooth', 'The game accepts controllers over Bluetooth.')
+    await claim(unnamed, null, 'usb', 'The game accepts controllers over USB.')
+  })
+
+  it('keeps two controllers of one source in the same family as two records', async () => {
+    const reports = (await listExternalReports(t.sql, scope)).filter((r) => r.sourceId === named)
+    expect(reports).toHaveLength(2)
+    expect(reports.map((r) => r.controllerAsWritten).sort()).toEqual([
+      'Xbox Elite Wireless Controller Series 2',
+      'Xbox Wireless Controller',
+    ])
+    for (const r of reports) {
+      expect(r.familySlug).toBe(xboxFamily)
+      expect(r.variantName).toBe(null)
+      expect(r.claims).toHaveLength(1)
+    }
+    // Distinct, stable identities for React keys: source + family + controller identity.
+    expect(reports.map((r) => r.recordKey).sort()).toEqual(
+      [
+        `${named}|${xboxFamily}|Xbox Wireless Controller`,
+        `${named}|${xboxFamily}|Xbox Elite Wireless Controller Series 2`,
+      ].sort(),
+    )
+  })
+
+  it('keeps a family-less source with two transports in one record', async () => {
+    const reports = (await listExternalReports(t.sql, scope)).filter((r) => r.sourceId === unnamed)
+    expect(reports).toHaveLength(1)
+    const [report] = reports
+    expect(report.familySlug).toBe(null)
+    expect(report.familyName).toBe(null)
+    expect(report.controllerAsWritten).toBe(null)
+    expect(report.claims.map((c) => c.connection).sort()).toEqual(['bluetooth', 'usb'])
+    // No single transport is stated for the record as a whole; each claim keeps its own.
+    expect(report.connection).toBe(null)
+    expect(report.recordKey).toBe(`${unnamed}||`)
+    // Nothing is missing on the transport dimension.
+    expect(report.missing).not.toContain('Connection')
+  })
+
+  it('leaves the existing aggregation unchanged', async () => {
+    const items = await listEvidenceItems(t.sql, scope)
+
+    // The family-less source never becomes a controller row.
+    expect(items.filter((i) => i.origin === unnamed)).toEqual([])
+
+    const xbox = combine(items).find((c) => c.familyId === id.family(xboxFamily).id)
+    const [{ n }] = await t.sql<{ n: number }[]>`
+      select count(distinct c.source_id)::int as n
+      from evidence_claims c
+      join evidence_sources s on s.id = c.source_id
+      where c.controller_family_id = ${id.family(xboxFamily).id}
+        and c.visibility = 'published' and not c.is_demo and s.review_status = 'published'`
+    // Two wording records from one source still count as one external report.
+    expect(xbox?.externalReports).toBe(n)
+    expect(xbox?.directTests).toBe(0)
+    // Summary shape is unchanged: the eight physical controls plus the support subject.
+    expect(xbox?.summaries).toHaveLength(9)
+    expect(xbox?.summaries.find((s) => s.control === 'controller_support')?.state).toBe('reported_works')
+    expect(xbox?.summaries.find((s) => s.control === 'triggers')?.state).toBe('no_data')
+  })
+})
