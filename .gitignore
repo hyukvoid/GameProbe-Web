@@ -27,3 +27,7 @@ blob-report/
 *.log
 .DS_Store
 Thumbs.db
+
+# Agent instruction files that `next dev` writes when it detects a coding agent
+AGENTS.md
+CLAUDE.md
