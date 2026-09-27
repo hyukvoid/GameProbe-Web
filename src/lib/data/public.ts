@@ -6,7 +6,7 @@ import {
   type ControlSummary,
   type EvidenceItem,
 } from '../aggregate'
-import type { ClaimInput } from '../compatibility'
+import type { ClaimInput, ReviewedClaimFields, VerificationContextInput } from '../compatibility'
 import type { Control, ConnectionType, EvidenceControl, Result, SourceType } from '../domain'
 import { missingEvidenceFields } from '../validation'
 
@@ -15,7 +15,16 @@ import { missingEvidenceFields } from '../validation'
 //   * external claims with visibility 'published' from sources with status 'published'
 //   * development fixtures only when includeDemo is true
 
-export type Scope = { includeDemo: boolean; gameId?: string; familyId?: string }
+export type Scope = {
+  includeDemo: boolean
+  gameId?: string
+  familyId?: string
+  /**
+   * Raw report lists only (listExternalReports, listVerificationRequests): with `familyId`,
+   * also return claims that name no controller. Claims for other families stay excluded.
+   */
+  includeGameWide?: boolean
+}
 
 export type Game = { id: string; slug: string; name: string; aliases: string[] }
 
@@ -330,7 +339,13 @@ async function listClaims(
     where c.visibility = ${visibility} and src.review_status = ${sourceStatus}
       ${scope.includeDemo ? sql`` : sql`and not c.is_demo`}
       ${scope.gameId ? sql`and c.game_id = ${scope.gameId}` : sql``}
-      ${scope.familyId ? sql`and c.controller_family_id = ${scope.familyId}` : sql``}
+      ${
+        !scope.familyId
+          ? sql``
+          : scope.includeGameWide
+            ? sql`and (c.controller_family_id = ${scope.familyId} or c.controller_family_id is null)`
+            : sql`and c.controller_family_id = ${scope.familyId}`
+      }
     order by src.published_on desc nulls last, src.added_at desc, c.control`
 
   const byKey = new Map<
@@ -423,16 +438,19 @@ type CompatibilityClaimRow = {
   is_demo: boolean
 }
 
+type FamilyPageScope = { includeDemo: boolean; gameId: string; familyId: string }
+
 /**
- * Published claims for one game that can inform one controller family's page: claims about
- * that family, plus claims that name no controller (game-wide context). Claims about other
- * families are never returned. Verification requests are excluded; they are listed
- * separately and do not inform a result.
+ * Reviewed claims for one game that a controller family's page may show: claims about that
+ * family plus claims that name no controller. Claims about other families are never
+ * returned. Visibility and source status are fixed per call, so the two public entry points
+ * below can never mix published evidence with verification context.
  */
-export async function listCompatibilityClaims(
+async function listFamilyPageClaims(
   sql: Sql,
-  scope: { includeDemo: boolean; gameId: string; familyId: string },
-): Promise<ClaimInput[]> {
+  scope: FamilyPageScope,
+  visibility: 'published' | 'needs_direct_test',
+): Promise<ReviewedClaimFields[]> {
   const rows = await sql<CompatibilityClaimRow[]>`
     select c.source_id::text, src.source_type, src.url, src.title, c.controller_family_id::text as family_id,
            v.name as variant_name, c.controller_as_written, c.connection_type, c.controller_mode,
@@ -441,7 +459,7 @@ export async function listCompatibilityClaims(
     from evidence_claims c
     join evidence_sources src on src.id = c.source_id
     left join controller_variants v on v.id = c.controller_variant_id
-    where c.visibility = 'published' and src.review_status = 'published'
+    where c.visibility = ${visibility} and src.review_status = ${visibility}
       and c.game_id = ${scope.gameId}
       and (c.controller_family_id = ${scope.familyId} or c.controller_family_id is null)
       ${scope.includeDemo ? sql`` : sql`and not c.is_demo`}
@@ -464,6 +482,18 @@ export async function listCompatibilityClaims(
     statement: r.statement,
     isDemo: r.is_demo,
   }))
+}
+
+/** Published claims: the only external evidence that can decide a connection result. */
+export async function listCompatibilityClaims(sql: Sql, scope: FamilyPageScope): Promise<ClaimInput[]> {
+  const rows = await listFamilyPageClaims(sql, scope, 'published')
+  return rows.map((r) => ({ ...r, visibility: 'published' as const }))
+}
+
+/** Claims flagged for a direct test: shown beside a connection as context, never counted. */
+export async function listVerificationContext(sql: Sql, scope: FamilyPageScope): Promise<VerificationContextInput[]> {
+  const rows = await listFamilyPageClaims(sql, scope, 'needs_direct_test')
+  return rows.map((r) => ({ ...r, visibility: 'needs_direct_test' as const }))
 }
 
 export function listExternalReports(sql: Sql, scope: Scope) {

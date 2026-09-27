@@ -15,7 +15,8 @@ test('empty database shows honest empty states, not filler', async ({ page }) =>
   await page.goto('/')
   await expect(page.getByRole('link', { name: 'GameProbe' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Wuthering Waves' })).toBeVisible()
-  await expect(page.getByText('No verified tests yet.')).toBeVisible()
+  await expect(page.getByText('No direct tests yet.')).toBeVisible()
+  await expect(page.getByText(/verified (direct )?tests?/i)).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Submit a test' }).first()).toBeVisible()
   await expect(page.getByText('No issues reported yet.')).toBeVisible()
 })
@@ -117,6 +118,41 @@ test('an external report is published only after review and is labelled as exter
   const external = page.getByRole('region', { name: 'External reports' })
   await expect(external.getByText('E2E: triggers work for this poster.')).toBeVisible()
   await expect(external.getByText('“8bitdo ultimate 2”')).toBeVisible()
+})
+
+test('a game-wide report awaiting a direct test is shown as context and not promoted', async ({ page }) => {
+  await signIn(page)
+  await page.goto('/admin/evidence')
+  await page.getByLabel('URL').fill('https://news.example.org/genshin-android-usb-e2e')
+  await page.getByRole('button', { name: 'Add to inbox' }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Untitled source')
+
+  // Names no controller, states USB, flagged for a direct test.
+  await page.getByLabel('Yes, someone describes what happened when they played').check()
+  await page.getByLabel('Game', { exact: true }).selectOption({ label: 'Genshin Impact' })
+  await page.getByLabel('Connection', { exact: true }).selectOption({ label: 'USB cable' })
+  await page.getByLabel('Controller support: Works').check()
+  await page.getByLabel('Reviewed claim (public)').fill('E2E: the game reports USB controller support on Android.')
+  await page.getByRole('button', { name: 'Needs direct test' }).click()
+  await expect(page.getByRole('status')).toContainText('Listed publicly under Needs verification')
+
+  await page.goto('/games/genshin-impact/sony-dualsense')
+  const claimText = 'E2E: the game reports USB controller support on Android.'
+  const connections = page.getByRole('region', { name: 'Connection compatibility' })
+  const usb = connections.locator('[data-connection="usb"]')
+  await expect(usb).toContainText('No controller-specific evidence')
+  await expect(usb).toContainText('Needs verification')
+  await expect(usb).toContainText('Controller not specified')
+  await expect(usb).toContainText(claimText)
+  await expect(usb).not.toContainText('Reported working')
+  await expect(usb).not.toContainText('Officially reported supported')
+  await expect(connections.locator('[data-connection="bluetooth"]')).not.toContainText(claimText)
+  await expect(connections.locator('[data-connection="dongle"]')).not.toContainText('Needs verification')
+
+  // The same record is inspectable below, once.
+  const raw = page.getByRole('region', { name: 'Needs verification', exact: true })
+  await expect(raw.getByText(claimText)).toHaveCount(1)
+  await expect(page.getByText(/verified (direct )?tests?/i)).toHaveCount(0)
 })
 
 test('admin pages require sign-in', async ({ page }) => {

@@ -10,6 +10,7 @@ import {
   listCompatibilityClaims,
   listDirectTests,
   listExternalReports,
+  listVerificationContext,
   listVerificationRequests,
 } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
@@ -39,16 +40,23 @@ export default async function CombinationPage({ params }: Props) {
   const includeDemo = includeDemoData()
   const scope = { includeDemo, gameId: game.id, familyId: family.id }
   // Two bounded waves, at most three page-data queries in flight, as on the other pages.
+  // Raw lists include reports that name no controller, so every context record shown in the
+  // summary can also be inspected below. Other families never appear.
+  const rawScope = { ...scope, includeGameWide: true }
   const [tests, claims, reports] = await Promise.all([
     listDirectTests(sql, { ...scope, limit: null }),
     listCompatibilityClaims(sql, scope),
-    listExternalReports(sql, scope),
+    listExternalReports(sql, rawScope),
   ])
-  const requests = await listVerificationRequests(sql, scope)
+  const [requests, verification] = await Promise.all([
+    listVerificationRequests(sql, rawScope),
+    listVerificationContext(sql, scope),
+  ])
 
-  const answer = deriveCompatibility({ familyId: family.id, directTests: tests, claims })
+  const answer = deriveCompatibility({ familyId: family.id, directTests: tests, claims, verification })
 
-  const sources = new Set(reports.map((r) => r.sourceId)).size
+  // Sources about this family only; game-wide reports are context, not family evidence.
+  const sources = new Set(reports.filter((r) => r.familySlug === family.slug).map((r) => r.sourceId)).size
   const versions = [...new Set(tests.map((t) => t.gameVersion).filter((v): v is string => v !== null))].sort((a, b) =>
     b.localeCompare(a, 'en', { numeric: true }),
   )
@@ -121,7 +129,7 @@ export default async function CombinationPage({ params }: Props) {
             </>
           ) : (
             <div className="empty">
-              <p>No verified tests yet.</p>
+              <p>No direct tests yet.</p>
             </div>
           )}
         </section>
@@ -130,7 +138,10 @@ export default async function CombinationPage({ params }: Props) {
       {hasRecords && (
         <section aria-labelledby="external-heading">
           <h2 id="external-heading">External reports</h2>
-          <p className="section-note">Found on other sites and reviewed by hand. Not tested by GameProbe.</p>
+          <p className="section-note">
+            Found on other sites and reviewed by hand. Not tested by GameProbe. Reports marked “Controller not
+            specified” are about the game in general, not about {family.name}.
+          </p>
           {reports.length > 0 ? (
             <ul className="records">
               {reports.map((r) => (
@@ -148,7 +159,7 @@ export default async function CombinationPage({ params }: Props) {
       <section aria-labelledby="submit-heading">
         <h2 id="submit-heading">Submit a test</h2>
         <p className="section-note">
-          {!hasRecords && 'No verified tests yet. '}
+          {!hasRecords && 'No direct tests yet. '}
           Record the connection you used and what each control did. Fields you don’t know can stay empty.
         </p>
         <p className="page-actions" style={{ marginTop: 10 }}>

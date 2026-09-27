@@ -42,8 +42,8 @@ export type DirectTestInput = {
   isDemo: boolean
 }
 
-/** One published evidence claim for the page's game. */
-export type ClaimInput = {
+/** Fields every reviewed claim carries, whatever its visibility. Not used on its own. */
+export type ReviewedClaimFields = {
   sourceId: string
   sourceType: SourceType
   url: string
@@ -62,6 +62,16 @@ export type ClaimInput = {
   statement: string
   isDemo: boolean
 }
+
+/** A published claim for the page's game. Published claims are the only external evidence. */
+export type ClaimInput = ReviewedClaimFields & { visibility: 'published' }
+
+/**
+ * A reviewed claim a reviewer flagged as needing a direct test. It is shown as context and
+ * can never decide a result. The literal `visibility` keeps it from being passed as a
+ * ClaimInput, and deriveCompatibility checks it again at runtime.
+ */
+export type VerificationContextInput = ReviewedClaimFields & { visibility: 'needs_direct_test' }
 
 // ---------------------------------------------------------------------------
 // Scoped evidence
@@ -99,14 +109,36 @@ type EntryBase = {
   isDemo: boolean
 }
 
-/** Evidence about this controller family. Only this type can decide a result. */
-export type ControllerEvidence = EntryBase & { applies: 'controller'; connection: ConnectionType | null }
+// Two standings, kept structurally apart:
+//   'evidence'           approved direct tests and published claims
+//   'needs_verification' reviewed claims flagged for a direct test; context only
 
-/** Evidence that names no controller. Context only. */
-export type GameWideEvidence = EntryBase & { applies: 'game_wide'; connection: ConnectionType | null }
+/** Evidence about this controller family. Only this type can decide a result. */
+export type ControllerEvidence = EntryBase & {
+  standing: 'evidence'
+  applies: 'controller'
+  connection: ConnectionType | null
+}
+
+/** Published evidence that names no controller. Context only. */
+export type GameWideEvidence = EntryBase & {
+  standing: 'evidence'
+  applies: 'game_wide'
+  connection: ConnectionType | null
+}
 
 /** Controller evidence that states the connection being answered. */
 export type ConnectionEvidence = ControllerEvidence & { connection: ConnectionType }
+
+/**
+ * A claim awaiting a direct test, about this family or naming no controller. Context only:
+ * it is never counted, never sets a result, and never feeds the per-control table.
+ */
+export type VerificationContext = EntryBase & {
+  standing: 'needs_verification'
+  applies: 'controller' | 'game_wide'
+  connection: ConnectionType | null
+}
 
 export type OutcomeCounts = { working: number; problem: number }
 
@@ -128,6 +160,8 @@ export type ConnectionAnswer = {
   evidence: ConnectionEvidence[]
   /** Game-wide reports for this connection. Never counted above. */
   gameWide: GameWideEvidence[]
+  /** Claims awaiting a direct test for this connection, this family's first. Never counted. */
+  verification: VerificationContext[]
   latestDate: string | null
 }
 
@@ -141,7 +175,11 @@ export type ControlRow = {
 export type CompatibilityAnswer = {
   connections: ConnectionAnswer[]
   /** Records that state no connection. They count toward no connection. */
-  connectionNotStated: { evidence: ControllerEvidence[]; gameWide: GameWideEvidence[] }
+  connectionNotStated: {
+    evidence: ControllerEvidence[]
+    gameWide: GameWideEvidence[]
+    verification: VerificationContext[]
+  }
   /** Physical controls only, one row per control and connection with evidence. */
   controls: ControlRow[]
 }
@@ -160,7 +198,7 @@ export function kindOfSource(sourceType: SourceType): EvidenceKind {
   return sourceType === 'official' ? 'official' : 'external'
 }
 
-function claimControllerScope(c: ClaimInput): ControllerScope {
+function claimControllerScope(c: ReviewedClaimFields): ControllerScope {
   if (c.familyId === null) return { level: 'unspecified' }
   if (c.variantName) return { level: 'variant', name: c.variantName }
   if (c.controllerAsWritten) return { level: 'wording', wording: c.controllerAsWritten }
@@ -170,6 +208,7 @@ function claimControllerScope(c: ClaimInput): ControllerScope {
 function directEntry(t: DirectTestInput): ControllerEvidence {
   const results = t.observations.map((o) => ({ subject: o.control as EvidenceControl, result: o.result }))
   return {
+    standing: 'evidence',
     applies: 'controller',
     kind: 'direct',
     key: `direct:${t.id}`,
@@ -190,11 +229,11 @@ function directEntry(t: DirectTestInput): ControllerEvidence {
 }
 
 /** Claims of one source under one controller identity and one set of conditions. */
-function claimEntries<A extends 'controller' | 'game_wide'>(
-  claims: ClaimInput[],
-  applies: A,
-): (EntryBase & { applies: A; connection: ConnectionType | null })[] {
-  const groups = new Map<string, ClaimInput[]>()
+function groupClaims(
+  claims: ReviewedClaimFields[],
+  prefix: 'claim' | 'verify',
+): (EntryBase & { connection: ConnectionType | null; familyId: string | null })[] {
+  const groups = new Map<string, ReviewedClaimFields[]>()
   for (const c of claims) {
     const identity = c.variantName ?? c.controllerAsWritten ?? ''
     const key = [c.sourceId, identity, c.connection, c.androidVersion, c.gameVersion, c.controllerMode]
@@ -208,9 +247,9 @@ function claimEntries<A extends 'controller' | 'game_wide'>(
     const first = list[0]
     const results = list.map((c) => ({ subject: c.control, result: c.result }))
     return {
-      applies,
+      familyId: first.familyId,
       kind: kindOfSource(first.sourceType),
-      key: `claim:${key}`,
+      key: `${prefix}:${key}`,
       origin: first.sourceId,
       controller: claimControllerScope(first),
       connection: first.connection,
@@ -226,6 +265,43 @@ function claimEntries<A extends 'controller' | 'game_wide'>(
       isDemo: list.some((c) => c.isDemo),
     }
   })
+}
+
+function withoutFamily<T extends { familyId: string | null }>(entry: T): Omit<T, 'familyId'> {
+  const { familyId: _familyId, ...rest } = entry
+  void _familyId
+  return rest
+}
+
+function publishedEntries(claims: ClaimInput[], familyId: string) {
+  for (const c of claims) {
+    if (c.visibility !== 'published') throw new Error('Only published claims can be evidence.')
+  }
+  const controller: ControllerEvidence[] = groupClaims(
+    claims.filter((c) => c.familyId === familyId),
+    'claim',
+  ).map((e) => ({ ...withoutFamily(e), standing: 'evidence', applies: 'controller' }))
+  const gameWide: GameWideEvidence[] = groupClaims(
+    claims.filter((c) => c.familyId === null),
+    'claim',
+  ).map((e) => ({ ...withoutFamily(e), standing: 'evidence', applies: 'game_wide' }))
+  return { controller, gameWide }
+}
+
+function verificationEntries(requests: VerificationContextInput[], familyId: string): VerificationContext[] {
+  for (const r of requests) {
+    if (r.visibility !== 'needs_direct_test') throw new Error('Verification context must be a needs-direct-test claim.')
+  }
+  // This family first, then claims that name no controller. Other families never appear.
+  const applicable = [
+    ...requests.filter((r) => r.familyId === familyId),
+    ...requests.filter((r) => r.familyId === null),
+  ]
+  return groupClaims(applicable, 'verify').map((e) => ({
+    ...withoutFamily(e),
+    standing: 'needs_verification',
+    applies: e.familyId === null ? 'game_wide' : 'controller',
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -245,23 +321,32 @@ function decide(counts: OutcomeCounts): Exclude<ConnectionResult, 'none'> {
 }
 
 /**
- * The answer for one connection. Every entry must be controller evidence that states this
- * exact connection; anything else is a programming error and throws rather than being
- * counted.
+ * The answer for one connection. Every counted entry must be published or approved
+ * controller evidence that states this exact connection; anything else is a programming
+ * error and throws rather than being counted. Context lists are checked the same way.
  */
 export function deriveConnectionAnswer(
   connection: ConnectionType,
   evidence: ConnectionEvidence[],
   gameWide: GameWideEvidence[] = [],
+  verification: VerificationContext[] = [],
 ): ConnectionAnswer {
   for (const e of evidence) {
+    if (e.standing !== 'evidence') {
+      throw new Error(`A claim awaiting a direct test cannot answer ${connection}.`)
+    }
     if (e.applies !== 'controller' || e.connection !== connection) {
       throw new Error(`Evidence for ${e.connection ?? 'no connection'} cannot answer ${connection}.`)
     }
   }
   for (const g of gameWide) {
-    if (g.applies !== 'game_wide' || g.connection !== connection) {
+    if (g.standing !== 'evidence' || g.applies !== 'game_wide' || g.connection !== connection) {
       throw new Error(`Game-wide context for ${g.connection ?? 'no connection'} cannot sit under ${connection}.`)
+    }
+  }
+  for (const v of verification) {
+    if (v.standing !== 'needs_verification' || v.connection !== connection) {
+      throw new Error(`Verification context for ${v.connection ?? 'no connection'} cannot sit under ${connection}.`)
     }
   }
 
@@ -303,6 +388,7 @@ export function deriveConnectionAnswer(
     externalDisagrees,
     evidence,
     gameWide,
+    verification,
     latestDate: latest(evidence.map((e) => e.date)),
   }
 }
@@ -359,29 +445,34 @@ export function deriveControlRows(evidence: ControllerEvidence[]): ControlRow[] 
 // ---------------------------------------------------------------------------
 
 /**
- * Transport-first answer for one game and controller family. `directTests` and `claims`
- * must already be limited to the page's game and to public records; records of other
- * controller families are ignored here as a second line of defence.
+ * Transport-first answer for one game and controller family. `directTests`, `claims` and
+ * `verification` must already be limited to the page's game; records of other controller
+ * families are ignored here as a second line of defence.
+ *
+ * Decisive: approved direct tests and published claims about this family.
+ * Context only: published claims naming no controller, claims awaiting a direct test, and
+ * anything that states no connection.
  */
 export function deriveCompatibility(input: {
   familyId: string
   directTests: DirectTestInput[]
   claims: ClaimInput[]
+  verification?: VerificationContextInput[]
 }): CompatibilityAnswer {
-  const controllerClaims = input.claims.filter((c) => c.familyId === input.familyId)
-  const gameWideClaims = input.claims.filter((c) => c.familyId === null)
-
+  const published = publishedEntries(input.claims, input.familyId)
   const controller: ControllerEvidence[] = [
     ...input.directTests.filter((t) => t.familyId === input.familyId).map(directEntry),
-    ...claimEntries(controllerClaims, 'controller'),
+    ...published.controller,
   ]
-  const gameWide: GameWideEvidence[] = claimEntries(gameWideClaims, 'game_wide')
+  const gameWide = published.gameWide
+  const verification = verificationEntries(input.verification ?? [], input.familyId)
 
   const connections = CONNECTION_TYPES.map((connection) =>
     deriveConnectionAnswer(
       connection,
       controller.filter((e): e is ConnectionEvidence => e.connection === connection),
       gameWide.filter((g) => g.connection === connection),
+      verification.filter((v) => v.connection === connection),
     ),
   )
 
@@ -390,7 +481,9 @@ export function deriveCompatibility(input: {
     connectionNotStated: {
       evidence: controller.filter((e) => e.connection === null),
       gameWide: gameWide.filter((g) => g.connection === null),
+      verification: verification.filter((v) => v.connection === null),
     },
+    // Only decisive evidence feeds the per-control table.
     controls: deriveControlRows(controller),
   }
 }

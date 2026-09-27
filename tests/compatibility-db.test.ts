@@ -4,6 +4,7 @@ import {
   listCompatibilityClaims,
   listDirectTests,
   listExternalReports,
+  listVerificationContext,
   listVerificationRequests,
 } from '@/lib/data/public'
 import { createTestSession } from '@/lib/data/submissions'
@@ -58,8 +59,10 @@ async function source(
 
 async function answerFor(game: string, family: string): Promise<CompatibilityAnswer> {
   const s = { includeDemo: false, gameId: id.game(game).id, familyId: id.family(family).id }
-  const [directTests, claims] = [await listDirectTests(t.sql, { ...s, limit: null }), await listCompatibilityClaims(t.sql, s)]
-  return deriveCompatibility({ familyId: s.familyId, directTests, claims })
+  const directTests = await listDirectTests(t.sql, { ...s, limit: null })
+  const claims = await listCompatibilityClaims(t.sql, s)
+  const verification = await listVerificationContext(t.sql, s)
+  return deriveCompatibility({ familyId: s.familyId, directTests, claims, verification })
 }
 
 function at(a: CompatibilityAnswer, connection: ConnectionType) {
@@ -278,5 +281,109 @@ describe('direct tests are scoped to their connection', () => {
     expect(tests.find((x) => x.id === unknownTest)).toMatchObject({ connection: null, controllerDetected: null })
     // The default limit still applies when none is given.
     expect(await listDirectTests(t.sql, { ...scope, limit: 1 })).toHaveLength(1)
+  })
+})
+
+describe('verification context on a family page (needs a direct test)', () => {
+  const genshinDualSense = () => ({
+    ...scope,
+    gameId: id.game('genshin-impact').id,
+    familyId: id.family('sony-dualsense').id,
+  })
+  let androidPoliceRequest: string
+  let phandroidRequest: string
+  let otherFamilyRequest: string
+
+  beforeAll(async () => {
+    // As in production: Android Police names no controller and is flagged for a direct test.
+    androidPoliceRequest = await source('www.androidpolice.com/verification', 'genshin-impact', 'article', 'needs_direct_test', [
+      { family: null, connection: 'bluetooth', statement: 'Android Police reports Bluetooth controller support on Android.' },
+      { family: null, connection: 'usb', statement: 'Android Police reports USB controller support on Android.' },
+    ])
+    phandroidRequest = await source('phandroid.com/verification', 'genshin-impact', 'article', 'needs_direct_test', [
+      { family: null, connection: null, statement: 'Controller support is reported, connection not stated.' },
+    ])
+    otherFamilyRequest = await source('www.8bitdo.com/verification', 'genshin-impact', 'other', 'needs_direct_test', [
+      { family: '8bitdo-ultimate', connection: 'usb', statement: 'An 8BitDo Ultimate is reported over USB.' },
+    ])
+  })
+
+  it('reads only requests for this family or naming no controller', async () => {
+    const context = await listVerificationContext(t.sql, genshinDualSense())
+    expect(new Set(context.map((c) => c.sourceId))).toEqual(new Set([unverifiedUsb, androidPoliceRequest, phandroidRequest]))
+    expect(context.every((c) => c.visibility === 'needs_direct_test')).toBe(true)
+  })
+
+  it('USB: game-wide request shown as context; result and every count unchanged', async () => {
+    const usb = at(await answerFor('genshin-impact', 'sony-dualsense'), 'usb')
+    expect(usb).toMatchObject({ result: 'none', basis: null, evidence: [] })
+    expect(connectionResultLabel(usb)).toBe('No controller-specific evidence')
+    expect(usb.totals).toEqual({ direct: 0, official: 0, external: 0 })
+    expect(usb.outcomes).toEqual({
+      direct: { working: 0, problem: 0 },
+      official: { working: 0, problem: 0 },
+      external: { working: 0, problem: 0 },
+    })
+    expect(usb.verification.map((v) => [v.origin, v.applies])).toEqual([
+      [unverifiedUsb, 'controller'],
+      [androidPoliceRequest, 'game_wide'],
+    ])
+    expect(usb.verification.find((v) => v.origin === androidPoliceRequest)).toMatchObject({
+      controller: { level: 'unspecified' },
+      statement: 'Android Police reports USB controller support on Android.',
+    })
+    // The published game-wide report is still separate context.
+    expect(usb.gameWide.map((g) => g.origin)).toEqual([androidPolice])
+  })
+
+  it('Bluetooth: still officially reported supported, the request beside it but not counted', async () => {
+    const bt = at(await answerFor('genshin-impact', 'sony-dualsense'), 'bluetooth')
+    expect(connectionResultLabel(bt)).toBe('Officially reported supported')
+    expect(bt.totals).toEqual({ direct: 0, official: 1, external: 0 })
+    expect(bt.evidence.map((e) => e.origin)).toEqual([hoyoverse])
+    expect(bt.verification.map((v) => v.origin)).toEqual([androidPoliceRequest])
+  })
+
+  it('Dongle: no request; connection-less request only under Connection not stated', async () => {
+    const a = await answerFor('genshin-impact', 'sony-dualsense')
+    expect(at(a, 'dongle')).toMatchObject({ result: 'none', evidence: [], gameWide: [], verification: [] })
+    expect(a.connectionNotStated.verification.map((v) => v.origin)).toEqual([phandroidRequest])
+    for (const c of a.connections) expect(c.verification.some((v) => v.origin === phandroidRequest)).toBe(false)
+    expect(a.connectionNotStated.evidence.map((e) => e.origin)).toEqual([game8])
+    expect(a.controls).toEqual([])
+  })
+
+  it('shows another family’s request only on that family’s page', async () => {
+    const dualsense = await answerFor('genshin-impact', 'sony-dualsense')
+    const everywhere = [...dualsense.connections.flatMap((c) => c.verification), ...dualsense.connectionNotStated.verification]
+    expect(everywhere.some((v) => v.origin === otherFamilyRequest)).toBe(false)
+
+    const eightBitDo = await answerFor('genshin-impact', '8bitdo-ultimate')
+    expect(at(eightBitDo, 'usb').verification.map((v) => [v.origin, v.applies])).toEqual([
+      [otherFamilyRequest, 'controller'],
+      [androidPoliceRequest, 'game_wide'],
+    ])
+    expect(at(eightBitDo, 'usb').verification.some((v) => v.origin === unverifiedUsb)).toBe(false)
+    expect(at(eightBitDo, 'usb').result).toBe('none')
+  })
+
+  it('raw Needs verification on a family page: this family plus game-wide, once each, never another family', async () => {
+    const raw = await listVerificationRequests(t.sql, { ...genshinDualSense(), includeGameWide: true })
+    expect(new Set(raw.map((r) => r.sourceId))).toEqual(new Set([unverifiedUsb, androidPoliceRequest, phandroidRequest]))
+    // Android Police's Bluetooth and USB claims stay one record.
+    const ap = raw.filter((r) => r.sourceId === androidPoliceRequest)
+    expect(ap).toHaveLength(1)
+    expect(ap[0].familySlug).toBe(null)
+    expect(ap[0].claims.map((c) => c.connection).sort()).toEqual(['bluetooth', 'usb'])
+    // Without the option, callers keep the family-only list.
+    const familyOnly = await listVerificationRequests(t.sql, genshinDualSense())
+    expect(familyOnly.map((r) => r.sourceId)).toEqual([unverifiedUsb])
+  })
+
+  it('raw External reports on a family page: this family plus game-wide, never another family', async () => {
+    const raw = await listExternalReports(t.sql, { ...genshinDualSense(), includeGameWide: true })
+    expect(new Set(raw.map((r) => r.sourceId))).toEqual(new Set([hoyoverse, game8, androidPolice, tomsGuide, phandroid]))
+    expect(raw.some((r) => r.familySlug === 'sony-dualshock-4')).toBe(false)
+    expect(raw.filter((r) => r.sourceId === androidPolice)).toHaveLength(1)
   })
 })

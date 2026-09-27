@@ -8,6 +8,7 @@ import {
   type CompatibilityAnswer,
   type ConnectionEvidence,
   type DirectTestInput,
+  type VerificationContextInput,
 } from '@/lib/compatibility'
 import type { ConnectionType } from '@/lib/domain'
 
@@ -34,6 +35,7 @@ function claim(p: Partial<ClaimInput> = {}): ClaimInput {
     result: 'works',
     statement: 'Stated by the source.',
     isDemo: false,
+    visibility: 'published',
     ...p,
   }
 }
@@ -78,7 +80,7 @@ describe('connection rows', () => {
       expect(c.totals).toEqual(NO_TOTALS)
       expect(connectionResultLabel(c)).toBe('No controller-specific evidence')
     }
-    expect(a.connectionNotStated).toEqual({ evidence: [], gameWide: [] })
+    expect(a.connectionNotStated).toEqual({ evidence: [], gameWide: [], verification: [] })
     expect(a.controls).toEqual([])
   })
 })
@@ -148,7 +150,7 @@ describe('controller scope isolation', () => {
       [direct({ familyId: OTHER_FAMILY, connection: 'usb' })],
     )
     for (const c of a.connections) expect(c).toMatchObject({ result: 'none', evidence: [], gameWide: [] })
-    expect(a.connectionNotStated).toEqual({ evidence: [], gameWide: [] })
+    expect(a.connectionNotStated).toEqual({ evidence: [], gameWide: [], verification: [] })
     expect(a.controls).toEqual([])
   })
 
@@ -305,6 +307,116 @@ describe('physical controls', () => {
     const a = derive([claim({ familyId: null, connection: 'bluetooth', control: 'triggers', result: 'broken' })])
     expect(a.controls).toEqual([])
     expect(at(a, 'bluetooth').result).toBe('none')
+  })
+})
+
+function request(p: Partial<VerificationContextInput> = {}): VerificationContextInput {
+  const { visibility: _v, ...base } = claim()
+  void _v
+  return { ...base, visibility: 'needs_direct_test', ...p }
+}
+
+describe('verification context (needs a direct test)', () => {
+  it('shows a game-wide USB request under USB only, without changing the USB result or counts', () => {
+    const androidPolice = request({ familyId: null, connection: 'usb', statement: 'USB controllers are supported.' })
+    const a = deriveCompatibility({ familyId: FAMILY, directTests: [], claims: [], verification: [androidPolice] })
+    const usb = at(a, 'usb')
+    expect(usb).toMatchObject({ result: 'none', basis: null, totals: NO_TOTALS, evidence: [], gameWide: [] })
+    expect(usb.outcomes).toEqual({
+      direct: { working: 0, problem: 0 },
+      official: { working: 0, problem: 0 },
+      external: { working: 0, problem: 0 },
+    })
+    expect(connectionResultLabel(usb)).toBe('No controller-specific evidence')
+    expect(usb.verification).toHaveLength(1)
+    expect(usb.verification[0]).toMatchObject({
+      standing: 'needs_verification',
+      applies: 'game_wide',
+      origin: androidPolice.sourceId,
+      controller: { level: 'unspecified' },
+      connection: 'usb',
+    })
+    expect(at(a, 'bluetooth').verification).toEqual([])
+    expect(at(a, 'dongle').verification).toEqual([])
+    expect(a.connectionNotStated.verification).toEqual([])
+  })
+
+  it('never adds to the decisive Bluetooth evidence beside a published official claim', () => {
+    const a = deriveCompatibility({
+      familyId: FAMILY,
+      directTests: [],
+      claims: [claim({ sourceType: 'official', connection: 'bluetooth' })],
+      verification: [request({ familyId: null, connection: 'bluetooth', sourceType: 'official' })],
+    })
+    const bt = at(a, 'bluetooth')
+    expect(connectionResultLabel(bt)).toBe('Officially reported supported')
+    expect(bt.totals).toEqual({ direct: 0, official: 1, external: 0 })
+    expect(bt.outcomes.official).toEqual({ working: 1, problem: 0 })
+    expect(bt.evidence).toHaveLength(1)
+    expect(bt.verification).toHaveLength(1)
+  })
+
+  it('keeps a controller-specific request as context only, even when it states a problem', () => {
+    const a = deriveCompatibility({
+      familyId: FAMILY,
+      directTests: [],
+      claims: [],
+      verification: [request({ connection: 'bluetooth', control: 'triggers', result: 'broken' })],
+    })
+    const bt = at(a, 'bluetooth')
+    expect(bt).toMatchObject({ result: 'none', basis: null, totals: NO_TOTALS, evidence: [] })
+    expect(bt.verification.map((v) => [v.applies, v.controller.level])).toEqual([['controller', 'family']])
+    // It never reaches the per-control table either.
+    expect(a.controls).toEqual([])
+  })
+
+  it('excludes requests about another controller family', () => {
+    const a = deriveCompatibility({
+      familyId: FAMILY,
+      directTests: [],
+      claims: [],
+      verification: [request({ familyId: OTHER_FAMILY, connection: 'usb' }), request({ familyId: OTHER_FAMILY })],
+    })
+    for (const c of a.connections) expect(c.verification).toEqual([])
+    expect(a.connectionNotStated.verification).toEqual([])
+  })
+
+  it('keeps a request with no connection under Connection not stated only', () => {
+    const unstated = request({ familyId: null, connection: null })
+    const a = deriveCompatibility({ familyId: FAMILY, directTests: [], claims: [], verification: [unstated] })
+    for (const c of a.connections) expect(c.verification).toEqual([])
+    expect(a.connectionNotStated.verification.map((v) => v.origin)).toEqual([unstated.sourceId])
+    expect(a.connectionNotStated.evidence).toEqual([])
+    expect(a.connectionNotStated.gameWide).toEqual([])
+  })
+
+  it('lists this family’s requests before game-wide ones', () => {
+    const a = deriveCompatibility({
+      familyId: FAMILY,
+      directTests: [],
+      claims: [],
+      verification: [request({ familyId: null, connection: 'usb' }), request({ connection: 'usb' })],
+    })
+    expect(at(a, 'usb').verification.map((v) => v.applies)).toEqual(['controller', 'game_wide'])
+  })
+
+  it('refuses to count a request as evidence, or to treat a published claim as a request', () => {
+    const asClaim = request({ connection: 'usb' }) as unknown as ClaimInput
+    expect(() => deriveCompatibility({ familyId: FAMILY, directTests: [], claims: [asClaim] })).toThrow(
+      /Only published claims can be evidence/,
+    )
+    const asRequest = claim({ connection: 'usb' }) as unknown as VerificationContextInput
+    expect(() => deriveCompatibility({ familyId: FAMILY, directTests: [], claims: [], verification: [asRequest] })).toThrow(
+      /must be a needs-direct-test claim/,
+    )
+    const context = deriveCompatibility({
+      familyId: FAMILY,
+      directTests: [],
+      claims: [],
+      verification: [request({ connection: 'usb' })],
+    })
+    const entry = at(context, 'usb').verification[0] as unknown as ConnectionEvidence
+    expect(() => deriveConnectionAnswer('usb', [entry])).toThrow(/awaiting a direct test cannot answer usb/)
   })
 })
 

@@ -8,6 +8,7 @@ import {
   type ControllerScope,
   type EvidenceKind,
   type GameWideEvidence,
+  type VerificationContext,
 } from '@/lib/compatibility'
 import { CONNECTION_HEADINGS, CONTROL_LABELS, EVIDENCE_CONTROL_SHORT, SOURCE_TYPE_LABELS } from '@/lib/domain'
 import { formatDate } from '@/lib/format'
@@ -42,14 +43,16 @@ export function describeControllerScope(scope: ControllerScope, familyName: stri
   }
 }
 
-function resultsLine(e: ControllerEvidence | GameWideEvidence): string {
+type ContextOrEvidence = ControllerEvidence | GameWideEvidence | VerificationContext
+
+function resultsLine(e: ContextOrEvidence): string {
   const parts: string[] = []
   if (e.detected !== null) parts.push(e.detected ? 'Detected by the game' : 'Not detected by the game')
   for (const r of e.results) parts.push(`${EVIDENCE_CONTROL_SHORT[r.subject]}: ${r.result === 'works' ? 'works' : 'problem'}`)
   return parts.length ? parts.join('; ') : 'No result recorded'
 }
 
-function conditionsLine(e: ControllerEvidence | GameWideEvidence): string {
+function conditionsLine(e: ContextOrEvidence): string {
   return [
     e.androidVersion ? `Android ${e.androidVersion}` : 'Android version not stated',
     e.gameVersion ? `Game version ${e.gameVersion}` : 'Game version not stated',
@@ -57,12 +60,19 @@ function conditionsLine(e: ControllerEvidence | GameWideEvidence): string {
   ].join(' · ')
 }
 
-function EvidenceLine({ e, familyName }: { e: ControllerEvidence | GameWideEvidence; familyName: string }) {
+function EvidenceLine({ e, familyName }: { e: ContextOrEvidence; familyName: string }) {
   return (
     <li>
       <span>
         <strong>{KIND_LABELS[e.kind]}</strong>
         {e.source && <> · {hostOf(e.source.url)}</>} · {e.date ? formatDate(e.date) : 'Date not stated'}
+        {e.standing === 'needs_verification' && (
+          <>
+            {' '}
+            <span className="state state-verify">Needs verification</span>
+          </>
+        )}
+        {e.applies === 'game_wide' && <span className="muted"> · Related game-wide report</span>}
         {e.isDemo && <span className="muted small"> (demo fixture)</span>}
       </span>
       <span>
@@ -131,13 +141,41 @@ function ConnectionRecord({ a, familyName }: { a: ConnectionAnswer; familyName: 
             </ul>
           </div>
         )}
+        <VerificationBlock items={a.verification} where={heading} familyName={familyName} />
       </div>
     </li>
   )
 }
 
+/** Claims awaiting a direct test. Always visibly separate from the counted evidence. */
+function VerificationBlock({
+  items,
+  where,
+  familyName,
+}: {
+  items: VerificationContext[]
+  where: string
+  familyName: string
+}) {
+  if (items.length === 0) return null
+  const one = items.length === 1
+  return (
+    <div className="context" data-context="needs-verification">
+      <p className="small muted">
+        Needs verification: {one ? 'a reviewed report' : 'reviewed reports'} awaiting a direct test.{' '}
+        {one ? 'It is' : 'They are'} not counted in the result above.
+      </p>
+      <ul className="scope-list" aria-label={`Needs verification: ${where}`}>
+        {items.map((e) => (
+          <EvidenceLine key={e.key} e={e} familyName={familyName} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function NotStatedRecord({ answer, familyName }: { answer: CompatibilityAnswer; familyName: string }) {
-  const { evidence, gameWide } = answer.connectionNotStated
+  const { evidence, gameWide, verification } = answer.connectionNotStated
   return (
     <li className="record" data-connection="not-stated">
       <div className="record-kind">
@@ -164,6 +202,7 @@ function NotStatedRecord({ answer, familyName }: { answer: CompatibilityAnswer; 
             </ul>
           </div>
         )}
+        <VerificationBlock items={verification} where="Connection not stated" familyName={familyName} />
       </div>
     </li>
   )
@@ -177,7 +216,9 @@ export function ConnectionCompatibility({ answer, familyName }: { answer: Compat
       {answer.connections.map((a) => (
         <ConnectionRecord key={a.connection} a={a} familyName={familyName} />
       ))}
-      {(ns.evidence.length > 0 || ns.gameWide.length > 0) && <NotStatedRecord answer={answer} familyName={familyName} />}
+      {(ns.evidence.length > 0 || ns.gameWide.length > 0 || ns.verification.length > 0) && (
+        <NotStatedRecord answer={answer} familyName={familyName} />
+      )}
     </ul>
   )
 }

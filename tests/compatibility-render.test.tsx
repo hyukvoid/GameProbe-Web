@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ConnectionCompatibility, PhysicalControls } from '@/components/compatibility'
-import { deriveCompatibility, type ClaimInput } from '@/lib/compatibility'
+import { ExternalReportRecord } from '@/components/evidence'
+import type { ExternalReport } from '@/lib/data/public'
+import { deriveCompatibility, type ClaimInput, type VerificationContextInput } from '@/lib/compatibility'
 
 const FAMILY = 'family-dualsense'
 
@@ -23,6 +25,7 @@ function claim(p: Partial<ClaimInput>): ClaimInput {
     result: 'works',
     statement: 'Stated.',
     isDemo: false,
+    visibility: 'published',
     ...p,
   }
 }
@@ -84,6 +87,113 @@ describe('ConnectionCompatibility markup', () => {
     const unstated = record(html, 'not-stated')
     expect(unstated).toContain('Connection not stated')
     expect(unstated).toContain('game8.co')
+  })
+})
+
+describe('verification context markup', () => {
+  const request = (p: Partial<VerificationContextInput>): VerificationContextInput => {
+    const { visibility: _v, ...base } = claim({})
+    void _v
+    return { ...base, visibility: 'needs_direct_test', ...p }
+  }
+  const answer = deriveCompatibility({
+    familyId: FAMILY,
+    directTests: [],
+    claims: [
+      claim({ sourceId: 'hoyoverse', sourceType: 'official', url: 'https://support.hoyoverse.com/x', connection: 'bluetooth' }),
+    ],
+    verification: [
+      request({
+        sourceId: 'androidpolice',
+        url: 'https://www.androidpolice.com/genshin',
+        familyId: null,
+        connection: 'usb',
+        statement: 'Android Police reports USB controller support on Android.',
+      }),
+      request({
+        sourceId: 'androidpolice',
+        url: 'https://www.androidpolice.com/genshin',
+        familyId: null,
+        connection: 'bluetooth',
+        statement: 'Android Police reports Bluetooth controller support on Android.',
+      }),
+      request({ sourceId: 'phandroid', url: 'https://phandroid.com/genshin', familyId: null, connection: null }),
+    ],
+  })
+  const html = renderToStaticMarkup(<ConnectionCompatibility answer={answer} familyName="DualSense" />)
+
+  it('shows the game-wide USB request as context while USB stays without evidence', () => {
+    const usb = record(html, 'usb')
+    expect(usb).toContain('No controller-specific evidence')
+    expect(usb).toContain('Needs verification')
+    expect(usb).toContain('Related game-wide report')
+    expect(usb).toContain('Controller not specified')
+    expect(usb).toContain('Android Police reports USB controller support on Android.')
+    expect(usb).toContain('not counted in the result above')
+    for (const promoted of ['Reported working', 'Officially reported supported', 'Direct tests conflict']) {
+      expect(usb).not.toContain(promoted)
+    }
+    expect(usb).not.toContain('Bluetooth controller support')
+  })
+
+  it('keeps the Bluetooth result from the published source, with the request beside it', () => {
+    const bt = record(html, 'bluetooth')
+    expect(bt).toContain('Officially reported supported')
+    expect(bt).toContain('Android Police reports Bluetooth controller support on Android.')
+    expect(bt).not.toContain('USB controller support')
+  })
+
+  it('shows no request under Dongle, and the connection-less request only under Connection not stated', () => {
+    const dongle = record(html, 'dongle')
+    expect(dongle).toContain('No controller-specific evidence')
+    expect(dongle).not.toContain('Needs verification')
+    const unstated = record(html, 'not-stated')
+    expect(unstated).toContain('Needs verification')
+    expect(unstated).toContain('phandroid.com')
+    for (const c of ['bluetooth', 'usb', 'dongle']) expect(record(html, c)).not.toContain('phandroid.com')
+  })
+})
+
+describe('raw external report record', () => {
+  const base: ExternalReport = {
+    sourceId: 'androidpolice',
+    url: 'https://www.androidpolice.com/genshin',
+    sourceType: 'article',
+    title: null,
+    publishedOn: '2025-03-27',
+    gameSlug: 'genshin-impact',
+    gameName: 'Genshin Impact',
+    familySlug: null,
+    familyName: null,
+    variantName: null,
+    controllerAsWritten: null,
+    gameVersion: null,
+    androidVersion: null,
+    deviceAsWritten: null,
+    deviceModel: null,
+    connection: null,
+    controllerMode: null,
+    isDemo: false,
+    recordKey: 'androidpolice||',
+    claims: [
+      { control: 'controller_support', result: 'works', statement: 'Both.', connection: 'bluetooth' },
+      { control: 'controller_support', result: 'works', statement: 'Both.', connection: 'usb' },
+    ],
+    missing: [],
+  }
+  const connectionFact = (html: string) => html.match(/<dt>Connection<\/dt><dd>(.*?)<\/dd>/)?.[1]
+
+  it('shows each transport a multi-transport report states, not Unknown', () => {
+    const html = renderToStaticMarkup(<ExternalReportRecord report={base} />)
+    expect(connectionFact(html)).toBe('Bluetooth, USB cable')
+    expect(html).toContain('Controller not specified')
+  })
+
+  it('still shows Unknown when no claim states a transport', () => {
+    const html = renderToStaticMarkup(
+      <ExternalReportRecord report={{ ...base, claims: base.claims.map((c) => ({ ...c, connection: null })) }} />,
+    )
+    expect(connectionFact(html)).toContain('Unknown')
   })
 })
 

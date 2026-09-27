@@ -133,6 +133,17 @@ export function DirectTestRecord({ test, showGame = false }: { test: DirectTest;
   )
 }
 
+/**
+ * The transports a report states. One shared transport when its claims agree; otherwise each
+ * transport any claim states (a source may state Bluetooth and USB). Null only when no claim
+ * states one, so a stated transport is never shown as unknown.
+ */
+function reportConnections(report: ExternalReport): string | null {
+  if (report.connection) return CONNECTION_LABELS[report.connection]
+  const stated = [...new Set(report.claims.map((c) => c.connection).filter((c): c is ConnectionType => c !== null))]
+  return stated.length ? stated.map((c) => CONNECTION_LABELS[c]).join(', ') : null
+}
+
 export function ExternalReportRecord({ report, showGame = false }: { report: ExternalReport; showGame?: boolean }) {
   return (
     <li className="record external">
@@ -167,7 +178,7 @@ export function ExternalReportRecord({ report, showGame = false }: { report: Ext
             <Value value={report.gameVersion} />
           </Fact>
           <Fact label="Connection">
-            <Value value={connectionLabel(report.connection)} />
+            <Value value={reportConnections(report)} />
           </Fact>
           <Fact label="Device">
             <Value value={[report.deviceAsWritten, report.deviceModel].filter(Boolean).join(' ') || null} />
@@ -198,7 +209,7 @@ export function ExternalReportRecord({ report, showGame = false }: { report: Ext
   )
 }
 
-export function EmptyTests({ href = '/submit', text = 'No verified tests yet.' }: { href?: string; text?: string }) {
+export function EmptyTests({ href = '/submit', text = 'No direct tests yet.' }: { href?: string; text?: string }) {
   return (
     <div className="empty">
       <p>{text}</p>
