@@ -228,6 +228,12 @@ tbody tr:hover { background: #f9f9f6; }
 .record-body { display: grid; gap: 6px; min-width: 0; }
 .record-title { font-weight: 600; }
 .record.external { background: transparent; }
+.record-kind h3 { font-size: 1rem; }
+
+/* Evidence lines inside a connection record. */
+.scope-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 0.925rem; }
+.scope-list li { display: grid; gap: 1px; padding-left: 10px; border-left: 1px solid var(--rule-strong); min-width: 0; overflow-wrap: anywhere; }
+.context { display: grid; gap: 6px; margin-top: 4px; }
 .record.external .record-kind { color: var(--muted); }
 
 .facts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: 0; font-size: 0.925rem; }

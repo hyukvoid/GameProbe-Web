@@ -70,6 +70,13 @@ export const CONNECTION_LABELS: Record<ConnectionType, string> = {
   dongle: '2.4 GHz USB receiver',
 }
 
+/** Row headings in the connection compatibility section. Every transport always has a row. */
+export const CONNECTION_HEADINGS: Record<ConnectionType, string> = {
+  bluetooth: 'Bluetooth',
+  usb: 'USB cable',
+  dongle: 'Dongle / 2.4 GHz receiver',
+}
+
 /** Android versions offered in the form. Stored as text; NULL means unknown. */
 export const ANDROID_VERSIONS = ['17', '16', '15', '14', '13', '12', '11', '10', '9', '8.1', '8.0'] as const
 

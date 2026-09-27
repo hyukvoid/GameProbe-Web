@@ -6,6 +6,7 @@ import {
   type ControlSummary,
   type EvidenceItem,
 } from '../aggregate'
+import type { ClaimInput } from '../compatibility'
 import type { Control, ConnectionType, EvidenceControl, Result, SourceType } from '../domain'
 import { missingEvidenceFields } from '../validation'
 
@@ -150,6 +151,8 @@ export type DirectTest = {
   gameSlug: string
   gameName: string
   gameVersion: string | null
+  /** Catalog family id; null for a free-text controller not linked to the catalog. */
+  familyId: string | null
   familySlug: string | null
   familyName: string | null
   variantName: string | null
@@ -172,6 +175,7 @@ type DirectRow = {
   game_slug: string
   game_name: string
   game_version: string | null
+  family_id: string | null
   family_slug: string | null
   family_name: string | null
   variant_name: string | null
@@ -197,6 +201,7 @@ export async function hydrateDirectTests(sql: Sql, rows: DirectRow[]): Promise<D
     gameSlug: r.game_slug,
     gameName: r.game_name,
     gameVersion: r.game_version,
+    familyId: r.family_id,
     familySlug: r.family_slug,
     familyName: r.family_name,
     variantName: r.variant_name,
@@ -216,7 +221,7 @@ export async function hydrateDirectTests(sql: Sql, rows: DirectRow[]): Promise<D
 
 export const DIRECT_TEST_COLUMNS = (sql: Sql) => sql`
   s.id::text, g.slug as game_slug, g.name as game_name, b.version as game_version,
-  f.slug as family_slug, f.name as family_name, v.name as variant_name, s.controller_as_entered,
+  s.controller_family_id::text as family_id, f.slug as family_slug, f.name as family_name, v.name as variant_name, s.controller_as_entered,
   s.controller_mode, s.connection_type, s.device_as_entered, s.device_model_code, s.android_version,
   s.controller_detected, s.tested_on::text, s.notes, s.is_demo`
 
@@ -227,7 +232,8 @@ export const DIRECT_TEST_JOINS = (sql: Sql) => sql`
   left join controller_families f on f.id = s.controller_family_id
   left join controller_variants v on v.id = s.controller_variant_id`
 
-export async function listDirectTests(sql: Sql, scope: Scope & { limit?: number }): Promise<DirectTest[]> {
+/** Approved direct tests, newest first. `limit: null` returns all of them (used for summaries). */
+export async function listDirectTests(sql: Sql, scope: Scope & { limit?: number | null }): Promise<DirectTest[]> {
   const rows = await sql<DirectRow[]>`
     select ${DIRECT_TEST_COLUMNS(sql)}
     ${DIRECT_TEST_JOINS(sql)}
@@ -236,7 +242,7 @@ export async function listDirectTests(sql: Sql, scope: Scope & { limit?: number 
       ${scope.gameId ? sql`and s.game_id = ${scope.gameId}` : sql``}
       ${scope.familyId ? sql`and s.controller_family_id = ${scope.familyId}` : sql``}
     order by s.tested_on desc, s.submitted_at desc
-    limit ${scope.limit ?? 50}`
+    ${scope.limit === null ? sql`` : sql`limit ${scope.limit ?? 50}`}`
   return hydrateDirectTests(sql, rows)
 }
 
@@ -396,6 +402,68 @@ async function listClaims(
       }),
     }
   })
+}
+
+type CompatibilityClaimRow = {
+  source_id: string
+  source_type: SourceType
+  url: string
+  title: string | null
+  family_id: string | null
+  variant_name: string | null
+  controller_as_written: string | null
+  connection_type: ConnectionType | null
+  controller_mode: string | null
+  android_version: string | null
+  game_version: string | null
+  date: string | null
+  control: EvidenceControl
+  result: Result
+  statement: string
+  is_demo: boolean
+}
+
+/**
+ * Published claims for one game that can inform one controller family's page: claims about
+ * that family, plus claims that name no controller (game-wide context). Claims about other
+ * families are never returned. Verification requests are excluded; they are listed
+ * separately and do not inform a result.
+ */
+export async function listCompatibilityClaims(
+  sql: Sql,
+  scope: { includeDemo: boolean; gameId: string; familyId: string },
+): Promise<ClaimInput[]> {
+  const rows = await sql<CompatibilityClaimRow[]>`
+    select c.source_id::text, src.source_type, src.url, src.title, c.controller_family_id::text as family_id,
+           v.name as variant_name, c.controller_as_written, c.connection_type, c.controller_mode,
+           c.android_version, c.game_version, coalesce(c.reported_on, src.published_on)::text as date,
+           c.control, c.result, c.statement, c.is_demo
+    from evidence_claims c
+    join evidence_sources src on src.id = c.source_id
+    left join controller_variants v on v.id = c.controller_variant_id
+    where c.visibility = 'published' and src.review_status = 'published'
+      and c.game_id = ${scope.gameId}
+      and (c.controller_family_id = ${scope.familyId} or c.controller_family_id is null)
+      ${scope.includeDemo ? sql`` : sql`and not c.is_demo`}
+    order by coalesce(c.reported_on, src.published_on) desc nulls last, src.added_at desc, c.control`
+  return rows.map((r) => ({
+    sourceId: r.source_id,
+    sourceType: r.source_type,
+    url: r.url,
+    title: r.title,
+    familyId: r.family_id,
+    variantName: r.variant_name,
+    controllerAsWritten: r.controller_as_written,
+    connection: r.connection_type,
+    controllerMode: r.controller_mode,
+    androidVersion: r.android_version,
+    gameVersion: r.game_version,
+    date: r.date,
+    control: r.control,
+    result: r.result,
+    statement: r.statement,
+    isDemo: r.is_demo,
+  }))
 }
 
 export function listExternalReports(sql: Sql, scope: Scope) {

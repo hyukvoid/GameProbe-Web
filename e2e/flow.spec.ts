@@ -56,9 +56,17 @@ test('a submitted test stays private until an admin approves it', async ({ page 
 
   await page.goto('/games/wuthering-waves/8bitdo-ultimate-2')
   await expect(page.getByText('E2E: RT does nothing in combat.')).toBeVisible()
-  const row = page.getByRole('row', { name: /L2\/R2/ })
+
+  // The Bluetooth test answers Bluetooth only.
+  const connections = page.getByRole('region', { name: 'Connection compatibility' })
+  await expect(connections.locator('[data-connection="bluetooth"]')).toContainText('Problem reported in direct tests')
+  await expect(connections.locator('[data-connection="usb"]')).toContainText('No controller-specific evidence')
+  await expect(connections.locator('[data-connection="dongle"]')).toContainText('No controller-specific evidence')
+
+  const row = page.getByRole('row', { name: /L2\/R2.*Bluetooth/ })
   await expect(row).toContainText('Broken')
   await expect(row).toContainText('1 direct test: broken')
+  await expect(page.getByRole('row', { name: /L2\/R2/ })).toHaveCount(1)
   await expect(page.getByText('Mode').first()).toBeVisible()
 })
 
@@ -90,14 +98,25 @@ test('an external report is published only after review and is labelled as exter
   await expect(page.getByText('This URL is already in the inbox.')).toBeVisible()
 
   await page.goto('/games/wuthering-waves/8bitdo-ultimate-2')
-  const row = page.getByRole('row', { name: /L2\/R2/ })
-  // Direct test says broken, the external report says works: kept apart, not averaged.
-  await expect(row).toContainText('Broken')
-  await expect(row).toContainText('1 direct test: broken')
-  await expect(row).toContainText('1 external report: works')
-  await expect(row).toContainText('External reports disagree with direct tests')
-  await expect(page.getByText('E2E: triggers work for this poster.')).toBeVisible()
-  await expect(page.getByText('“8bitdo ultimate 2”')).toBeVisible()
+  // The direct test was over Bluetooth; the external report states no connection. They are
+  // shown on separate rows and never set against each other or averaged.
+  const bluetoothRow = page.getByRole('row', { name: /L2\/R2.*Bluetooth/ })
+  await expect(bluetoothRow).toContainText('Broken')
+  await expect(bluetoothRow).toContainText('1 direct test: broken')
+  await expect(bluetoothRow).toContainText('No external reports')
+  const unstatedRow = page.getByRole('row', { name: /L2\/R2.*Connection not stated/ })
+  await expect(unstatedRow).toContainText('Reported working')
+  await expect(unstatedRow).toContainText('1 external report: works')
+
+  const connections = page.getByRole('region', { name: 'Connection compatibility' })
+  const bluetooth = connections.locator('[data-connection="bluetooth"]')
+  await expect(bluetooth).toContainText('Problem reported in direct tests')
+  await expect(bluetooth).not.toContainText('E2E: triggers work for this poster.')
+  await expect(connections.locator('[data-connection="not-stated"]')).toContainText('E2E: triggers work for this poster.')
+
+  const external = page.getByRole('region', { name: 'External reports' })
+  await expect(external.getByText('E2E: triggers work for this poster.')).toBeVisible()
+  await expect(external.getByText('“8bitdo ultimate 2”')).toBeVisible()
 })
 
 test('admin pages require sign-in', async ({ page }) => {
