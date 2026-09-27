@@ -1,0 +1,29 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.vercel/
+
+# Local data and test artifacts
+.pglite/
+playwright-report/
+test-results/
+blob-report/
+.review/
+
+# Tooling and OS
+.kiro/
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db
