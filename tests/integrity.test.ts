@@ -245,6 +245,37 @@ describe('evidence claim subjects and condition scope', () => {
       where source_id = ${scopedSource} and controller_family_id is null`
     expect(n).toBe(1)
   })
+
+  it('separates two controllers that normalize to the same family by their wording', async () => {
+    // Both name the same family with no model number, because the source states none:
+    // the wording column is the only thing that tells them apart.
+    const claim = (controllerAsWritten: string) => ({
+      source_id: scopedSource,
+      game_id: id.game('genshin-impact').id,
+      controller_family_id: id.family('xbox-wireless-controller').id,
+      controller_variant_id: null,
+      controller_as_written: controllerAsWritten,
+      control: 'controller_support',
+      result: 'works',
+      statement: 'Controller support stated for Android over Bluetooth.',
+      visibility: 'published',
+      android_version: '9.0',
+      connection_type: 'bluetooth',
+    })
+    const pad = claim('Xbox Wireless Controller')
+    const elite = claim('Xbox Elite Wireless Controller Series 2')
+
+    await t.sql`insert into evidence_claims ${t.sql(pad)}`
+    await t.sql`insert into evidence_claims ${t.sql(elite)}`
+
+    const [{ n }] = await t.sql<{ n: number }[]>`
+      select count(*)::int as n from evidence_claims
+      where source_id = ${scopedSource} and controller_family_id = ${id.family('xbox-wireless-controller').id}`
+    expect(n).toBe(2)
+
+    // The exact same row is still a duplicate.
+    await expect(t.sql`insert into evidence_claims ${t.sql(pad)}`).rejects.toThrow(/evidence_claims_scope_key/)
+  })
 })
 
 // ---------------------------------------------------------------------------
