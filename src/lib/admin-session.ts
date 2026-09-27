@@ -6,9 +6,11 @@ import { addressFromHeaders, clientKey, createSessionToken, readAuthConfig, SESS
 const COOKIE = 'gp_admin'
 
 export async function isAdmin(): Promise<boolean> {
+  // Read the cookie before anything else so every admin route is rendered per request,
+  // even when the build environment has no admin configuration.
+  const token = (await cookies()).get(COOKIE)?.value
   const config = readAuthConfig()
   if (!config) return false
-  const token = (await cookies()).get(COOKIE)?.value
   return verifySessionToken(token, config.secret)
 }
 

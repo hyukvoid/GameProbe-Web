@@ -417,6 +417,25 @@ export function unverified(combos: Combination[], games: Game[], families: Contr
   return toIssueRows(combos, games, families, needsVerification)
 }
 
+/** Game versions that appear in public data, offered as suggestions in the test form. */
+export async function listKnownVersions(sql: Sql, includeDemo: boolean): Promise<Record<string, string[]>> {
+  const rows = await sql<{ slug: string; version: string }[]>`
+    select distinct g.slug, b.version
+    from test_sessions s
+    join game_builds b on b.id = s.game_build_id
+    join games g on g.id = s.game_id
+    where s.status = 'approved' ${includeDemo ? sql`` : sql`and not s.is_demo`}
+    union
+    select distinct g.slug, c.game_version as version
+    from evidence_claims c
+    join games g on g.id = c.game_id
+    where c.visibility = 'published' and c.game_version is not null ${includeDemo ? sql`` : sql`and not c.is_demo`}`
+  const out: Record<string, string[]> = {}
+  for (const r of rows) (out[r.slug] ??= []).push(r.version)
+  for (const k of Object.keys(out)) out[k].sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------

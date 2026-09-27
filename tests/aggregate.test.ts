@@ -34,7 +34,8 @@ describe('summarizeControl', () => {
     expect(s.direct).toEqual({ works: 2, broken: 1 })
     expect(s.differences).toEqual([{ dimension: 'connection', works: ['USB cable'], broken: ['Bluetooth'] }])
     expect(isIssue(s)).toBe(true)
-    expect(needsVerification(s)).toBe(true)
+    // Listed once, as a known issue, rather than again under Needs verification.
+    expect(needsVerification(s)).toBe(false)
   })
 
   it('shows unknown conditions as Unknown rather than dropping them', () => {
@@ -66,7 +67,9 @@ describe('summarizeControl', () => {
   })
 
   it('uses a reported_* state when only external reports exist', () => {
-    expect(summarizeControl('triggers', [item({ kind: 'external', result: 'broken' })]).state).toBe('reported_broken')
+    const only = summarizeControl('triggers', [item({ kind: 'external', result: 'broken' })])
+    expect(only.state).toBe('reported_broken')
+    expect(needsVerification(only)).toBe(true)
     const both = summarizeControl('triggers', [
       item({ kind: 'external', result: 'broken' }),
       item({ kind: 'external', result: 'works' }),

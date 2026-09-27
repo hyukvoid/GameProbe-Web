@@ -1,4 +1,5 @@
 import 'server-only'
+import { connection } from 'next/server'
 import postgres, { type Sql } from 'postgres'
 
 export type { Sql }
@@ -22,6 +23,12 @@ export function db(): Sql {
     })
   }
   return globalForDb.gameprobeSql
+}
+
+/** For pages: marks the render as request-time so data is never baked in at build time. */
+export async function requestDb(): Promise<Sql> {
+  await connection()
+  return db()
 }
 
 /** Development fixtures are hidden unless explicitly enabled. */

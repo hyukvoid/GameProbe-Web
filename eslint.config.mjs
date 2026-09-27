@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local-only review output.
+    ".review/**",
+    ".pixelslop/**",
   ]),
 ]);
 

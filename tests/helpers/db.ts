@@ -31,7 +31,8 @@ export async function createTestDb(opts: { supabaseRoles?: boolean } = {}): Prom
     user: 'postgres',
     password: 'postgres',
     database: 'postgres',
-    max: 2,
+    // PGlite serves one session; a single pipelined connection keeps protocol messages ordered.
+    max: 1,
     prepare: false,
     onnotice: () => {},
   })

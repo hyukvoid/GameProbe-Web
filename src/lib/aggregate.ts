@@ -141,9 +141,12 @@ export function isIssue(s: ControlSummary): boolean {
   return ISSUE_STATES.includes(s.state) || s.externalDisagrees
 }
 
-/** Controls with only external reports, or direct tests that disagree. */
+/**
+ * Controls known only from external reports. Conflicting direct tests are already listed
+ * as known issues, so they are not repeated here.
+ */
 export function needsVerification(s: ControlSummary): boolean {
-  return s.state === 'conflicting' || s.state.startsWith('reported_') || s.externalDisagrees
+  return s.state.startsWith('reported_')
 }
 
 export const STATE_LABELS: Record<ControlState, string> = {
