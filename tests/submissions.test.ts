@@ -167,3 +167,56 @@ describe('direct test submission', () => {
     expect(triggers.differences[0]).toEqual({ dimension: 'connection', works: ['USB cable'], broken: ['Bluetooth'] })
   })
 })
+
+describe('controller detection', () => {
+  const pad = () => `family:${id.family('sony-dualsense').id}`
+
+  it('stores true, false and unknown exactly as answered', async () => {
+    const cases: [Record<string, string>, boolean | null][] = [
+      [{ controllerDetected: 'yes', result_triggers: 'broken' }, true],
+      [{ controllerDetected: 'no', result_menu: 'broken' }, false],
+      [{ controllerDetected: 'not_sure', result_menu: 'works' }, null],
+      [{ controllerDetected: '', result_menu: 'works' }, null],
+    ]
+    for (const [values, expected] of cases) {
+      const r = await createTestSession(t.sql, parsed({ controller: pad(), ...values }), { submitterKey: null })
+      if (!r.ok || !r.id) throw new Error('submit failed')
+      const [row] = await t.sql<{ controller_detected: boolean | null }[]>`
+        select controller_detected from test_sessions where id = ${r.id}`
+      expect(row.controller_detected).toBe(expected)
+    }
+    const [{ n }] = await t.sql<{ n: number }[]>`select count(*)::int as n from test_sessions`
+    expect(n).toBe(cases.length)
+  })
+
+  it('shows detection on the approved record without touching the control results', async () => {
+    const r = await createTestSession(
+      t.sql,
+      parsed({ controller: pad(), controllerDetected: 'yes', result_triggers: 'broken' }),
+      { submitterKey: null },
+    )
+    if (!r.ok || !r.id) throw new Error('submit failed')
+    await moderateTest(t.sql, { id: r.id, decision: 'approve', note: null, controller: { kind: 'none' } })
+
+    const [test] = await listDirectTests(t.sql, scope)
+    expect(test.controllerDetected).toBe(true)
+    expect(test.observations).toEqual([{ control: 'triggers', result: 'broken' }])
+
+    // A second test that says the game never accepted the controller stays as stated.
+    const undetected = await createTestSession(
+      t.sql,
+      parsed({ controller: pad(), controllerDetected: 'no', result_triggers: 'not_tested' }),
+      { submitterKey: null },
+    )
+    expect(undetected.ok).toBe(true)
+    if (!undetected.ok || !undetected.id) return
+    await moderateTest(t.sql, { id: undetected.id, decision: 'approve', note: null, controller: { kind: 'none' } })
+    const tests = await listDirectTests(t.sql, scope)
+    expect(tests.find((d) => d.id === undetected.id)).toMatchObject({
+      controllerDetected: false,
+      observations: [],
+    })
+    const [{ n }] = await t.sql<{ n: number }[]>`select count(*)::int as n from test_observations`
+    expect(n).toBe(1)
+  })
+})

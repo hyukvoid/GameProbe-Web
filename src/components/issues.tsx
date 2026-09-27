@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { DIMENSION_LABELS, describeCounts, type ControlSummary } from '@/lib/aggregate'
 import type { IssueRow } from '@/lib/data/public'
-import { CONTROL_SHORT } from '@/lib/domain'
+import { EVIDENCE_CONTROL_SHORT } from '@/lib/domain'
 import { formatDate } from '@/lib/format'
 import { StateLabel } from './evidence'
 
@@ -60,7 +60,7 @@ export function IssueTable({ rows, caption }: { rows: IssueRow[]; caption: strin
                   {row.gameName} · {row.familyName}
                 </Link>
               </td>
-              <td data-label="Control">{CONTROL_SHORT[s.control]}</td>
+              <td data-label="Control">{EVIDENCE_CONTROL_SHORT[s.control]}</td>
               <td data-label="Result">
                 <StateLabel state={s.state} />
               </td>

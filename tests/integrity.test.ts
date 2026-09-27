@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { addEvidenceSource, moderateTest, reviewEvidence } from '@/lib/data/admin'
 import { combine, listDirectTests, listEvidenceItems, listExternalReports } from '@/lib/data/public'
 import { createTestSession } from '@/lib/data/submissions'
+import { CONTROLS } from '@/lib/domain'
 import { parseEvidenceAdd, parseEvidenceReview, parseTestSubmission } from '@/lib/validation'
 import { createTestDb, form, ids, type TestDb } from './helpers/db'
 
@@ -168,5 +169,126 @@ describe('application flows under the new constraints', () => {
     const combo = combine(await listEvidenceItems(t.sql, { includeDemo: false })).find((c) => c.familyId === variant.family_id)
     expect(combo?.directTests).toBe(1)
     expect(combo?.externalReports).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Evidence claim subjects and condition scope (migration 0004).
+// ---------------------------------------------------------------------------
+
+describe('evidence claim subjects and condition scope', () => {
+  let scopedSource: string
+
+  beforeAll(async () => {
+    const [{ id: src }] = await t.sql<{ id: string }[]>`
+      insert into evidence_sources (url, url_key, source_type)
+      values ('https://support.example.org/genshin-android-usb', 'support.example.org/genshin-android-usb', 'official')
+      returning id::text`
+    scopedSource = src
+  })
+
+  const scoped = (overrides: Record<string, unknown> = {}) => ({
+    source_id: scopedSource,
+    game_id: id.game('genshin-impact').id,
+    controller_family_id: id.family('sony-dualsense').id,
+    controller_variant_id: null,
+    control: 'controller_support',
+    result: 'works',
+    statement: 'Controller support stated for Android.',
+    visibility: 'published',
+    ...overrides,
+  })
+
+  it('accepts controller_support and still accepts all eight direct-test controls', async () => {
+    await t.sql`insert into evidence_claims ${t.sql(scoped())}`
+    for (const control of CONTROLS) {
+      await t.sql`insert into evidence_claims ${t.sql(scoped({ control, result: 'broken', statement: `${control} stated.` }))}`
+    }
+    const [{ n }] = await t.sql<{ n: number }[]>`
+      select count(*)::int as n from evidence_claims where source_id = ${scopedSource}`
+    expect(n).toBe(1 + CONTROLS.length)
+  })
+
+  it('refuses an exact repeat of the same scoped claim, even with different wording', async () => {
+    await expect(t.sql`insert into evidence_claims ${t.sql(scoped())}`).rejects.toThrow(
+      /evidence_claims_scope_key/,
+    )
+    await expect(
+      t.sql`insert into evidence_claims ${t.sql(scoped({ statement: 'Same claim, reworded.' }))}`,
+    ).rejects.toThrow(/evidence_claims_scope_key/)
+    await expect(
+      t.sql`insert into evidence_claims ${t.sql(scoped({ control: 'triggers', result: 'broken', statement: 'RT dead.' }))}`,
+    ).rejects.toThrow(/evidence_claims_scope_key/)
+  })
+
+  it('accepts the same claim when one condition differs', async () => {
+    const differences: Record<string, unknown>[] = [
+      { connection_type: 'usb' },
+      { android_version: '16' },
+      { game_version: '5.5' },
+      { controller_mode: 'XInput' },
+      { controller_family_id: id.family('sony-dualshock-4').id },
+      { controller_variant_id: id.variant('dualsense-wireless-controller').id },
+    ]
+    for (const diff of differences) {
+      await t.sql`insert into evidence_claims ${t.sql(scoped(diff))}`
+    }
+    const [{ n }] = await t.sql<{ n: number }[]>`
+      select count(*)::int as n from evidence_claims where source_id = ${scopedSource}`
+    expect(n).toBe(1 + CONTROLS.length + differences.length)
+  })
+
+  it('accepts a claim when the source names no controller', async () => {
+    await t.sql`insert into evidence_claims ${t.sql(scoped({ controller_family_id: null, statement: 'No controller named.' }))}`
+    const [{ n }] = await t.sql<{ n: number }[]>`
+      select count(*)::int as n from evidence_claims
+      where source_id = ${scopedSource} and controller_family_id is null`
+    expect(n).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Detection, recorded by the tester and never derived from the observations.
+// ---------------------------------------------------------------------------
+
+describe('controller_detected on a direct test', () => {
+  const insert = (detected: boolean | null) =>
+    t.sql<{ id: string; controller_detected: boolean | null }[]>`
+      insert into test_sessions (game_id, controller_family_id, tested_on, controller_detected)
+      values (${id.game('genshin-impact').id}, ${id.family('sony-dualsense').id}, '2026-09-27', ${detected})
+      returning id::text, controller_detected`
+
+  it('accepts true, false and null', async () => {
+    expect((await insert(true))[0]).toMatchObject({ controller_detected: true })
+    expect((await insert(false))[0]).toMatchObject({ controller_detected: false })
+    expect((await insert(null))[0]).toMatchObject({ controller_detected: null })
+
+    // An unanswered field stays NULL, which means "unknown", not "no".
+    const [{ controller_detected: unanswered }] = await t.sql<{ controller_detected: boolean | null }[]>`
+      insert into test_sessions (game_id, controller_family_id, tested_on)
+      values (${id.game('genshin-impact').id}, ${id.family('sony-dualsense').id}, '2026-09-27')
+      returning controller_detected`
+    expect(unanswered).toBe(null)
+  })
+
+  it('keeps detection independent of the control results', async () => {
+    // Detected, but the triggers are broken: both are stored as stated.
+    const [detected] = await insert(true)
+    await t.sql`insert into test_observations (session_id, control, result) values (${detected.id}, 'triggers', 'broken')`
+    const [row] = await t.sql<{ controller_detected: boolean | null; observations: number }[]>`
+      select s.controller_detected, count(o.control)::int as observations
+      from test_sessions s left join test_observations o on o.session_id = s.id
+      where s.id = ${detected.id}
+      group by s.controller_detected`
+    expect(row).toEqual({ controller_detected: true, observations: 1 })
+
+    // Not detected, with no control tested at all: still a complete, valid test.
+    const [undetected] = await insert(false)
+    const [observations] = await t.sql<{ observations: number }[]>`
+      select count(*)::int as observations from test_observations where session_id = ${undetected.id}`
+    expect(observations.observations).toBe(0)
+    const [{ controller_detected }] = await t.sql<{ controller_detected: boolean | null }[]>`
+      select controller_detected from test_sessions where id = ${undetected.id}`
+    expect(controller_detected).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { needsVerification } from '@/lib/aggregate'
 import { addEvidenceSource, funnel, getEvidenceSource, reviewEvidence } from '@/lib/data/admin'
-import { combine, listEvidenceItems, listExternalReports, listVerificationRequests } from '@/lib/data/public'
+import { combine, listDirectTests, listEvidenceItems, listExternalReports, listVerificationRequests } from '@/lib/data/public'
 import { parseEvidenceAdd, parseEvidenceReview, type EvidenceReview } from '@/lib/validation'
 import { createTestDb, form, ids, type TestDb } from './helpers/db'
 
@@ -187,5 +188,98 @@ describe('Evidence Inbox', () => {
       publishedSources: 1,
       rejected: 1,
     })
+  })
+})
+
+describe('controller support evidence', () => {
+  it('publishes a source that names no controller without inventing a controller', async () => {
+    const src = await add('https://www.androidpolice.com/genshin-impact-finally-adds-controller-support-to-android')
+    const r = await reviewEvidence(
+      t.sql,
+      src,
+      review({
+        action: 'publish',
+        controller: '',
+        controllerAsWritten: '',
+        connection: 'usb',
+        androidVersion: '',
+        claimSummary: 'The Android version of the game accepts controllers.',
+        result_controller_support: 'works',
+      }),
+    )
+    expect(r.ok).toBe(true)
+
+    const reports = await listExternalReports(t.sql, scope)
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toMatchObject({
+      familySlug: null,
+      familyName: null,
+      connection: 'usb',
+      claims: [
+        {
+          control: 'controller_support',
+          result: 'works',
+          connection: 'usb',
+          statement: 'The Android version of the game accepts controllers.',
+        },
+      ],
+    })
+    expect(reports[0].missing).toContain('Exact controller model')
+    expect(reports[0].missing).not.toContain('Connection')
+
+    // Family-less evidence never becomes a controller row and never looks like a test.
+    expect(await listEvidenceItems(t.sql, scope)).toEqual([])
+    expect(combine(await listEvidenceItems(t.sql, scope))).toEqual([])
+    expect(await listDirectTests(t.sql, scope)).toEqual([])
+  })
+
+  it('lists an unverified controller support claim for a direct test', async () => {
+    const src = await add('https://www.tomsguide.com/phones/android-phones/genshin-impact-android-controller')
+    await reviewEvidence(
+      t.sql,
+      src,
+      review({
+        action: 'needs_direct_test',
+        controller: '',
+        connection: 'bluetooth',
+        claimSummary: 'The game accepts controllers over Bluetooth only.',
+        result_controller_support: 'works',
+      }),
+    )
+    expect(await listExternalReports(t.sql, scope)).toEqual([])
+    const requests = await listVerificationRequests(t.sql, scope)
+    expect(requests).toHaveLength(1)
+    expect(requests[0].claims[0].control).toBe('controller_support')
+    expect(requests[0].claims[0].connection).toBe('bluetooth')
+  })
+
+  it('summarises controller support for a controller a source does name', async () => {
+    const src = await add(
+      'https://support.hoyoverse.com/hc/en-us/articles/50333944370969-what-controllers-are-officially-supported',
+    )
+    const r = await reviewEvidence(
+      t.sql,
+      src,
+      review({
+        action: 'publish',
+        controller: `family:${id.family('sony-dualsense').id}`,
+        controllerAsWritten: 'DualSense Wireless Controller',
+        connection: 'bluetooth',
+        androidVersion: '16',
+        claimSummary: 'Listed as supported on Android via Bluetooth.',
+        result_controller_support: 'works',
+      }),
+    )
+    expect(r.ok).toBe(true)
+
+    const [combo] = combine(await listEvidenceItems(t.sql, scope))
+    expect(combo.externalReports).toBe(1)
+    const support = combo.summaries.find((s) => s.control === 'controller_support')
+    expect(support).toMatchObject({ state: 'reported_works', external: { works: 1, broken: 0 } })
+    // Known only from external evidence, so it is asked for as a direct test.
+    expect(needsVerification(support!)).toBe(true)
+    // Exactly one support row, and the eight physical controls keep their own state.
+    expect(combo.summaries.filter((s) => s.control === 'controller_support')).toHaveLength(1)
+    expect(combo.summaries.find((s) => s.control === 'triggers')?.state).toBe('no_data')
   })
 })

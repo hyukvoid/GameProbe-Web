@@ -57,6 +57,40 @@ describe('parseTestSubmission', () => {
     expect(!r.ok && r.errors.results).toMatch(/at least one/)
   })
 
+  it('records detection only from what the tester answered', () => {
+    expect(parseTestSubmission(submission({ controllerDetected: 'yes' }), TODAY)).toMatchObject({
+      ok: true,
+      value: { controllerDetected: true },
+    })
+    expect(parseTestSubmission(submission({ controllerDetected: 'no' }), TODAY)).toMatchObject({
+      ok: true,
+      value: { controllerDetected: false },
+    })
+    // "Not sure / not tested" and a missing answer are both unknown, never false.
+    expect(parseTestSubmission(submission({ controllerDetected: 'not_sure' }), TODAY)).toMatchObject({
+      ok: true,
+      value: { controllerDetected: null },
+    })
+    expect(parseTestSubmission(submission({ controllerDetected: '   ' }), TODAY)).toMatchObject({
+      ok: true,
+      value: { controllerDetected: null },
+    })
+    expect(parseTestSubmission(submission({ controllerDetected: 'maybe' }), TODAY).ok).toBe(false)
+  })
+
+  it('accepts a test with no control result only when the game did not detect the controller', () => {
+    const notDetected = parseTestSubmission(
+      submission({ result_triggers: 'not_tested', controllerDetected: 'no' }),
+      TODAY,
+    )
+    expect(notDetected.ok).toBe(true)
+    expect(notDetected.ok && notDetected.value.observations).toEqual([])
+    // Detected, or unknown, still requires something the tester actually tried.
+    expect(parseTestSubmission(submission({ result_triggers: 'not_tested', controllerDetected: 'yes' }), TODAY).ok).toBe(
+      false,
+    )
+  })
+
   it('refuses vague game versions such as "latest"', () => {
     for (const bad of ['latest', 'current patch', 'v2', '2.x']) {
       const r = parseTestSubmission(submission({ gameVersion: bad }), TODAY)
@@ -149,12 +183,28 @@ describe('parseEvidenceReview', () => {
     expect(parseEvidenceReview(review({ isReport: 'no', action: 'reject' }), variantFamily).ok).toBe(true)
   })
 
-  it('requires game, controller, a result and a written claim to publish', () => {
+  it('requires a game, a result and a written claim to publish', () => {
+    const r = parseEvidenceReview(review({ gameId: '', claimSummary: '', result_triggers: '' }), variantFamily)
+    expect(!r.ok && Object.keys(r.errors).sort()).toEqual(['claimSummary', 'gameId', 'results'])
+  })
+
+  it('publishes a source that names no controller without inventing one', () => {
+    const r = parseEvidenceReview(review({ controller: '' }), variantFamily)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.controllerFamilyId).toBe(null)
+    expect(r.value.controllerVariantId).toBe(null)
+    expect(r.value.results).toEqual([{ control: 'triggers', result: 'broken' }])
+  })
+
+  it('collects the evidence-only controller support subject alongside the controls', () => {
     const r = parseEvidenceReview(
-      review({ gameId: '', controller: '', claimSummary: '', result_triggers: '' }),
+      review({ result_triggers: '', result_controller_support: 'works' }),
       variantFamily,
     )
-    expect(!r.ok && Object.keys(r.errors).sort()).toEqual(['claimSummary', 'controller', 'gameId', 'results'])
+    expect(r.ok && r.value.results).toEqual([{ control: 'controller_support', result: 'works' }])
+    // The eight direct-test controls are unchanged: only the extra subject is new.
+    expect(parseEvidenceReview(review({}), variantFamily).ok).toBe(true)
   })
 
   it('keeps an unreviewed lead without requiring structured fields', () => {

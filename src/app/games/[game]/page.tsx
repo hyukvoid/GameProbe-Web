@@ -16,7 +16,7 @@ import {
   unverified,
 } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
-import { CONTROL_SHORT } from '@/lib/domain'
+import { EVIDENCE_CONTROL_SHORT } from '@/lib/domain'
 import { formatDate } from '@/lib/format'
 
 type Props = { params: Promise<{ game: string }> }
@@ -92,7 +92,7 @@ export default async function GamePage({ params }: Props) {
                         <ul className="results">
                           {issues.map((s) => (
                             <li key={s.control}>
-                              {CONTROL_SHORT[s.control]}: <StateLabel state={s.state} />
+                              {EVIDENCE_CONTROL_SHORT[s.control]}: <StateLabel state={s.state} />
                             </li>
                           ))}
                         </ul>
@@ -118,7 +118,7 @@ export default async function GamePage({ params }: Props) {
           {requests.length > 0 && (
             <ul className="records">
               {requests.map((r) => (
-                <ExternalReportRecord key={r.sourceId} report={r} />
+                <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
               ))}
             </ul>
           )}
@@ -147,7 +147,7 @@ export default async function GamePage({ params }: Props) {
         {reports.length > 0 ? (
           <ul className="records">
             {reports.map((r) => (
-              <ExternalReportRecord key={r.sourceId} report={r} />
+              <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
             ))}
           </ul>
         ) : (

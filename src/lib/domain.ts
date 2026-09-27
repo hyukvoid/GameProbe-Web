@@ -35,6 +35,29 @@ export const CONTROL_SHORT: Record<Control, string> = {
   vibration: 'Vibration',
 }
 
+/**
+ * Evidence-side subjects. Direct tests stay on the eight physical controls above: a
+ * tester only ever reports what an input did. A reviewed source can additionally state
+ * whether the game accepts a controller at all, which is what the Genshin Impact
+ * Android Bluetooth/USB question turns on. It is never offered as a button to press.
+ */
+export const EVIDENCE_CONTROLS = [...CONTROLS, 'controller_support'] as const
+export type EvidenceControl = (typeof EVIDENCE_CONTROLS)[number]
+
+export const EVIDENCE_CONTROL_LABELS: Record<EvidenceControl, string> = {
+  ...CONTROL_LABELS,
+  controller_support: 'Controller support',
+}
+
+export const EVIDENCE_CONTROL_SHORT: Record<EvidenceControl, string> = {
+  ...CONTROL_SHORT,
+  controller_support: 'Controller support',
+}
+
+/** /submit answer for "Controller detected by the game?". Stored as NULL when unknown. */
+export const DETECTED_ANSWERS = ['yes', 'no', 'not_sure'] as const
+export type DetectedAnswer = (typeof DETECTED_ANSWERS)[number]
+
 export const RESULTS = ['works', 'broken'] as const
 export type Result = (typeof RESULTS)[number]
 

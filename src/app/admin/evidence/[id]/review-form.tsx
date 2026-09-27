@@ -8,8 +8,8 @@ import {
   ANDROID_VERSIONS,
   CONNECTION_LABELS,
   CONNECTION_TYPES,
-  CONTROL_LABELS,
-  CONTROLS,
+  EVIDENCE_CONTROLS,
+  EVIDENCE_CONTROL_LABELS,
   SOURCE_TYPES,
   SOURCE_TYPE_LABELS,
 } from '@/lib/domain'
@@ -49,7 +49,7 @@ export function ReviewForm({ action, source, games, families }: Props) {
     claimSummary: source.claimSummary ?? '',
     reviewNotes: source.reviewNotes ?? '',
     duplicateOf: source.duplicateOfUrl ?? '',
-    ...Object.fromEntries(CONTROLS.map((c) => [`result_${c}`, claimResult(c)])),
+    ...Object.fromEntries(EVIDENCE_CONTROLS.map((c) => [`result_${c}`, claimResult(c)])),
   }
   const v = (k: string) => initial[k] ?? ''
   const inv = (k: string) => (errors[k] ? { 'aria-invalid': true as const, 'aria-describedby': `r-${k}-error` } : {})
@@ -154,7 +154,8 @@ export function ReviewForm({ action, source, games, families }: Props) {
               invalid={Boolean(errors.controller)}
             />
             <p id="r-controller-hint" className="hint">
-              Choose a model only if the source names the exact product. Otherwise pick “model not specified”.
+              Choose a model only if the source names the exact product, otherwise the family alone. Leave it empty
+              when the source names no controller: the claim is then shown as “Controller not specified”.
             </p>
             <FieldError id="r-controller-error" message={errors.controller} />
           </div>
@@ -203,6 +204,10 @@ export function ReviewForm({ action, source, games, families }: Props) {
       <fieldset>
         <legend>Stated results</legend>
         {errors.results && <p className="error-text">{errors.results}</p>}
+        <p className="hint">
+          Record only what the source states. “Controller support” is not an input: use it when the source says
+          whether the game accepts a controller at all, and say which connection in the field above.
+        </p>
         <table className="result-grid">
           <thead>
             <tr>
@@ -213,9 +218,9 @@ export function ReviewForm({ action, source, games, families }: Props) {
             </tr>
           </thead>
           <tbody>
-            {CONTROLS.map((c) => (
+            {EVIDENCE_CONTROLS.map((c) => (
               <tr key={c}>
-                <th scope="row">{CONTROL_LABELS[c]}</th>
+                <th scope="row">{EVIDENCE_CONTROL_LABELS[c]}</th>
                 {(['works', 'broken', ''] as const).map((r) => (
                   <td key={r || 'none'}>
                     <label>
@@ -224,7 +229,7 @@ export function ReviewForm({ action, source, games, families }: Props) {
                         name={`result_${c}`}
                         value={r}
                         defaultChecked={v(`result_${c}`) === r}
-                        aria-label={`${CONTROL_LABELS[c]}: ${r === '' ? 'Not stated' : r === 'works' ? 'Works' : 'Broken'}`}
+                        aria-label={`${EVIDENCE_CONTROL_LABELS[c]}: ${r === '' ? 'Not stated' : r === 'works' ? 'Works' : 'Broken'}`}
                       />
                     </label>
                   </td>

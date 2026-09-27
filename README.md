@@ -33,9 +33,18 @@ Rules the code enforces:
 - A source can only be published if a reviewer marked it as an actual report. Questions
   are not evidence.
 - A source's wording such as "8BitDo Ultimate" is stored as written. It is linked to an
-  exact controller model only when a reviewer picks one.
+  exact controller model only when a reviewer picks one. A source that names no
+  controller at all keeps its claim without one: it is listed under External reports as
+  "Controller not specified" and never creates a controller row.
+- A claim can be about **controller support** itself ("the game accepts a controller over
+  Bluetooth"), not only about one input control. Direct tests still only report the eight
+  physical controls, so the two kinds of evidence stay comparable.
 - Duplicate URLs are caught on entry, and a merged duplicate never counts. External
-  reports count once per source.
+  reports count once per source and controller.
+- A direct test also records whether the game detected the controller (`Yes`, `No`, or
+  unknown when the tester could not tell). It is stored exactly as reported and never
+  derived from the control results: a controller can be detected and still have broken
+  controls.
 - Contradictions are kept. A control with disagreeing results is shown as conflicting,
   with counts on each side and the conditions that differ (for example USB vs Bluetooth).
   Direct tests decide the shown result when any exist; external reports never override

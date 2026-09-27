@@ -13,7 +13,7 @@ import {
   listVerificationRequests,
 } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
-import { CONTROL_LABELS } from '@/lib/domain'
+import { EVIDENCE_CONTROL_LABELS } from '@/lib/domain'
 import { formatDate, plural } from '@/lib/format'
 
 type Props = { params: Promise<{ game: string; controller: string }> }
@@ -90,7 +90,7 @@ export default async function CombinationPage({ params }: Props) {
                 {summaries.map((s) => (
                   <tr key={s.control}>
                     <td className="primary" data-label="Control">
-                      {CONTROL_LABELS[s.control]}
+                      {EVIDENCE_CONTROL_LABELS[s.control]}
                     </td>
                     <td data-label="Result">
                       <StateLabel state={s.state} />
@@ -118,7 +118,7 @@ export default async function CombinationPage({ params }: Props) {
           <h2 id="verify-heading">Needs verification</h2>
           <ul className="records">
             {requests.map((r) => (
-              <ExternalReportRecord key={r.sourceId} report={r} />
+              <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
             ))}
           </ul>
         </section>
@@ -145,7 +145,7 @@ export default async function CombinationPage({ params }: Props) {
         {reports.length > 0 ? (
           <ul className="records">
             {reports.map((r) => (
-              <ExternalReportRecord key={r.sourceId} report={r} />
+              <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} />
             ))}
           </ul>
         ) : (

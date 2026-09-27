@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-import type { Control, ConnectionType, Result, ReviewStatus, SourceType, TestStatus } from '../domain'
+import type { ConnectionType, EvidenceControl, Result, ReviewStatus, SourceType, TestStatus } from '../domain'
 import { guessSourceType, urlKey } from '../url'
 import type { ControllerChoice, EvidenceAdd, EvidenceReview, FieldErrors } from '../validation'
 import { DIRECT_TEST_COLUMNS, DIRECT_TEST_JOINS, hydrateDirectTests, type DirectTest } from './public'
@@ -186,7 +186,7 @@ export type EvidenceDetail = {
   duplicateOfUrl: string | null
   reviewedAt: string | null
   isDemo: boolean
-  claims: { control: Control; result: Result; visibility: 'published' | 'needs_direct_test' }[]
+  claims: { control: EvidenceControl; result: Result; visibility: 'published' | 'needs_direct_test' }[]
 }
 
 export async function getEvidenceSource(sql: Sql, id: string): Promise<EvidenceDetail | null> {
@@ -200,7 +200,7 @@ export async function getEvidenceSource(sql: Sql, id: string): Promise<EvidenceD
     left join evidence_sources d on d.id = s.duplicate_of_id
     where s.id = ${id}`
   if (!r) return null
-  const claims = await sql<{ control: Control; result: Result; visibility: 'published' | 'needs_direct_test' }[]>`
+  const claims = await sql<{ control: EvidenceControl; result: Result; visibility: 'published' | 'needs_direct_test' }[]>`
     select control, result, visibility from evidence_claims where source_id = ${id} order by control`
   return {
     id: r.id as string,

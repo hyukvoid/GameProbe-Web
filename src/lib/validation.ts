@@ -4,10 +4,13 @@ import {
   ANDROID_VERSION_PATTERN,
   CONNECTION_TYPES,
   CONTROLS,
+  DETECTED_ANSWERS,
+  EVIDENCE_CONTROLS,
   GAME_VERSION_PATTERN,
   SOURCE_TYPES,
-  type Control,
   type ConnectionType,
+  type Control,
+  type EvidenceControl,
   type Result,
   type SourceType,
 } from './domain'
@@ -58,6 +61,21 @@ const deviceModel = optionalPattern(
   /^[A-Za-z0-9][A-Za-z0-9 ._/()-]{0,39}$/,
   'Model code can contain letters, numbers, spaces and . _ - / ( ).',
 )
+
+/**
+ * "Controller detected by the game?" Yes -> true, No -> false. "Not sure / not tested"
+ * and an unanswered field both mean unknown, which is NULL: this is never derived from
+ * the control results, because detection and per-control behaviour can disagree.
+ */
+const controllerDetected = z
+  .string()
+  .trim()
+  .transform((v) => (v === '' || v === 'not_sure' ? null : v))
+  .refine(
+    (v) => v === null || (DETECTED_ANSWERS as readonly string[]).includes(v),
+    'Choose Yes, No, or Not sure.',
+  )
+  .transform((v) => (v === null || v === 'not_sure' ? null : v === 'yes'))
 
 const isoDate = z
   .string()
@@ -112,6 +130,7 @@ const testSubmissionSchema = z.object({
   deviceName: optionalText(160, 'Device'),
   deviceModel,
   androidVersion,
+  controllerDetected,
   testedOn: z.string().trim(),
   notes: optionalText(2000, 'Notes'),
   website: z.string(),
@@ -127,6 +146,8 @@ export type TestSubmission = {
   deviceName: string | null
   deviceModel: string | null
   androidVersion: string | null
+  /** true = the game detected the controller, false = it did not, null = unknown. */
+  controllerDetected: boolean | null
   testedOn: string
   notes: string | null
   observations: { control: Control; result: Result }[]
@@ -148,6 +169,7 @@ export function parseTestSubmission(form: FormData, today: Date = new Date()): P
     deviceName: formValue(form, 'deviceName'),
     deviceModel: formValue(form, 'deviceModel'),
     androidVersion: formValue(form, 'androidVersion'),
+    controllerDetected: formValue(form, 'controllerDetected'),
     testedOn: formValue(form, 'testedOn'),
     notes: formValue(form, 'notes'),
     website: formValue(form, 'website'),
@@ -168,7 +190,10 @@ export function parseTestSubmission(form: FormData, today: Date = new Date()): P
     if (v === 'works' || v === 'broken') observations.push({ control, result: v })
     else if (v !== '' && v !== 'not_tested') errors[`result_${control}`] ??= 'Choose Works, Broken or Not tested.'
   }
-  if (observations.length === 0) {
+  // A tester with nothing to test because the game never accepted the controller still
+  // has something to report. Anyone else must state at least one control result.
+  const notDetected = raw.controllerDetected === 'no'
+  if (observations.length === 0 && !notDetected) {
     errors.results ??= 'Mark at least one control as Works or Broken.'
   }
 
@@ -198,6 +223,7 @@ export function parseTestSubmission(form: FormData, today: Date = new Date()): P
       deviceName: v.deviceName,
       deviceModel: v.deviceModel,
       androidVersion: v.androidVersion,
+      controllerDetected: v.controllerDetected,
       testedOn,
       notes: v.notes,
       observations,
@@ -278,13 +304,14 @@ export type EvidenceReview = Omit<z.infer<typeof evidenceReviewSchema>, 'isRepor
   isReport: boolean | null
   controllerFamilyId: string | null
   controllerVariantId: string | null
-  results: { control: Control; result: Result }[]
+  results: { control: EvidenceControl; result: Result }[]
 }
 
 /**
  * Validate an inbox review. Publishing is only allowed for something a human has marked
- * as an actual report, with a game, a controller family, at least one stated result and
- * a written claim. A controller variant is only set when the reviewer picked one.
+ * as an actual report, with a game, at least one stated result and a written claim. The
+ * controller family is optional because plenty of sources describe controller support
+ * without naming a controller; a variant is only set when the reviewer picked one.
  */
 export function parseEvidenceReview(
   form: FormData,
@@ -298,7 +325,7 @@ export function parseEvidenceReview(
   let controllerFamilyId: string | null = null
   let controllerVariantId: string | null = null
   const choice = parseControllerChoice(raw.controller.trim())
-  if (!choice || choice.kind === 'other') {
+  if (!choice) {
     errors.controller ??= 'Choose a catalog controller or leave it empty.'
   } else if (choice.kind === 'family') {
     controllerFamilyId = choice.familyId
@@ -311,8 +338,8 @@ export function parseEvidenceReview(
     }
   }
 
-  const results: { control: Control; result: Result }[] = []
-  for (const control of CONTROLS) {
+  const results: { control: EvidenceControl; result: Result }[] = []
+  for (const control of EVIDENCE_CONTROLS) {
     const v = formValue(form, `result_${control}`)
     if (v === 'works' || v === 'broken') results.push({ control, result: v })
   }
@@ -322,8 +349,7 @@ export function parseEvidenceReview(
     if (v.action === 'publish' || v.action === 'needs_direct_test') {
       if (v.isReport !== 'yes') errors.isReport ??= 'Only an actual report can be published. Questions are not evidence.'
       if (!v.gameId) errors.gameId ??= 'Choose the game this report is about.'
-      if (!controllerFamilyId) errors.controller ??= 'Choose at least the controller family.'
-      if (results.length === 0) errors.results ??= 'State at least one control result from the source.'
+      if (results.length === 0) errors.results ??= 'State at least one result from the source.'
       if (!v.claimSummary) errors.claimSummary ??= 'Write the reviewed claim in your own words.'
     }
     if (v.action === 'duplicate' && !v.duplicateOf) {
@@ -354,12 +380,18 @@ export function missingEvidenceFields(s: {
   deviceModelCode: string | null
   controllerVariantId: string | null
   connectionType: string | null
+  /**
+   * True when any claim of the report states a transport. Needed because one source can
+   * state both Bluetooth and USB, in which case there is no single shared connection.
+   * Defaults to whether `connectionType` itself is set.
+   */
+  connectionStated?: boolean
   publishedOn: string | null
 }): string[] {
   const missing: string[] = []
   if (!s.gameVersion) missing.push('Game version')
   if (!s.controllerVariantId) missing.push('Exact controller model')
-  if (!s.connectionType) missing.push('Connection')
+  if (!(s.connectionStated ?? s.connectionType !== null)) missing.push('Connection')
   if (!s.deviceAsWritten && !s.deviceModelCode) missing.push('Device')
   if (!s.androidVersion) missing.push('Android version')
   if (!s.publishedOn) missing.push('Source date')

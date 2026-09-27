@@ -10,6 +10,7 @@ import {
   CONTROLLER_MODE_SUGGESTIONS,
   CONTROL_LABELS,
   CONTROLS,
+  DETECTED_ANSWERS,
 } from '@/lib/domain'
 import { FieldError } from '@/components/field-error'
 import { submitTest, type SubmitState } from './actions'
@@ -24,6 +25,12 @@ type Props = {
 
 const RESULT_OPTION_LABELS = { works: 'Works', broken: 'Broken', not_tested: 'Not tested' } as const
 
+const DETECTED_LABELS: Record<(typeof DETECTED_ANSWERS)[number], string> = {
+  yes: 'Yes',
+  no: 'No',
+  not_sure: 'Not sure / not tested',
+}
+
 const FIELD_ORDER = [
   'form',
   'game',
@@ -35,6 +42,7 @@ const FIELD_ORDER = [
   'deviceName',
   'deviceModel',
   'androidVersion',
+  'controllerDetected',
   'results',
   ...CONTROLS.map((c) => `result_${c}`),
   'testedOn',
@@ -279,6 +287,32 @@ function TestForm({
 
       <fieldset>
         <legend>Results</legend>
+        <div
+          className="field"
+          role="group"
+          aria-labelledby="detected-label"
+          aria-describedby={errors.controllerDetected ? 'controllerDetected-error' : 'detected-hint'}
+        >
+          <span id="detected-label" className="label">
+            Controller detected by the game?
+          </span>
+          <div className="options">
+            {DETECTED_ANSWERS.map((answer) => {
+              const checked = v('controllerDetected') ? v('controllerDetected') === answer : answer === 'not_sure'
+              return (
+                <label key={answer}>
+                  <input type="radio" name="controllerDetected" value={answer} defaultChecked={checked} />{' '}
+                  {DETECTED_LABELS[answer]}
+                </label>
+              )
+            })}
+          </div>
+          <p id="detected-hint" className="hint">
+            Did the game accept the controller at all, for example in the menus? Answer separately from the results
+            below: a controller can be detected and still have broken controls.
+          </p>
+          <FieldError id="controllerDetected-error" message={errors.controllerDetected} />
+        </div>
         <p className="hint" id="results-hint">
           Mark each control you tried in the game. Leave the rest as Not tested.
         </p>

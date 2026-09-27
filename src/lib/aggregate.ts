@@ -1,12 +1,14 @@
-import { CONNECTION_LABELS, CONTROLS, UNKNOWN, type Control, type ConnectionType, type Result } from './domain'
+import { CONNECTION_LABELS, CONTROLS, UNKNOWN, type ConnectionType, type EvidenceControl, type Result } from './domain'
 
 /**
  * One observed result for one control. Direct tests and external claims share this shape
  * only for counting; `kind` keeps them apart and they are never added together.
+ * Direct items always use one of the eight physical controls; external items may also
+ * use the evidence-only subject `controller_support`.
  */
 export type EvidenceItem = {
   kind: 'direct' | 'external'
-  control: Control
+  control: EvidenceControl
   result: Result
   /** Test session id or evidence source id. External reports count once per source. */
   origin: string
@@ -44,7 +46,7 @@ export type ConditionDifference = {
 export type Counts = { works: number; broken: number }
 
 export type ControlSummary = {
-  control: Control
+  control: EvidenceControl
   direct: Counts
   external: Counts
   /**
@@ -97,7 +99,7 @@ export function conditionDifferences(items: EvidenceItem[]): ConditionDifference
   return out
 }
 
-export function summarizeControl(control: Control, all: EvidenceItem[]): ControlSummary {
+export function summarizeControl(control: EvidenceControl, all: EvidenceItem[]): ControlSummary {
   const items = all.filter((i) => i.control === control)
   const directItems = items.filter((i) => i.kind === 'direct')
   const externalItems = items.filter((i) => i.kind === 'external')
@@ -131,8 +133,17 @@ export function summarizeControl(control: Control, all: EvidenceItem[]): Control
   return { control, direct, external, state, externalDisagrees, differences, lastDate }
 }
 
+/**
+ * One summary per physical control, in a stable order. The evidence-only subject
+ * `controller_support` is appended only when evidence exists for it, so direct-test and
+ * external-report tables keep their present shape.
+ */
 export function summarizeControls(items: EvidenceItem[]): ControlSummary[] {
-  return CONTROLS.map((c) => summarizeControl(c, items))
+  const summaries = CONTROLS.map((c) => summarizeControl(c, items))
+  if (items.some((i) => i.control === 'controller_support')) {
+    summaries.push(summarizeControl('controller_support', items))
+  }
+  return summaries
 }
 
 export const ISSUE_STATES: ControlState[] = ['broken', 'conflicting', 'reported_broken', 'reported_conflicting']

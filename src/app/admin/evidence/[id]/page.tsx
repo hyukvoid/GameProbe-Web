@@ -5,7 +5,7 @@ import { requireAdmin } from '@/lib/admin-session'
 import { getEvidenceSource } from '@/lib/data/admin'
 import { listControllerCatalog, listGames } from '@/lib/data/public'
 import { requestDb } from '@/lib/db'
-import { CONTROL_SHORT, REVIEW_STATUS_LABELS, SOURCE_TYPE_LABELS } from '@/lib/domain'
+import { EVIDENCE_CONTROL_LABELS, REVIEW_STATUS_LABELS, SOURCE_TYPE_LABELS } from '@/lib/domain'
 import { formatDate, formatDateTime } from '@/lib/format'
 import { missingEvidenceFields } from '@/lib/validation'
 import { review } from '../../actions'
@@ -70,7 +70,7 @@ export default async function ReviewPage({ params, searchParams }: Props) {
       {source.claims.length > 0 && (
         <p className="section-note" style={{ marginBottom: 16 }}>
           Current public claims:{' '}
-          {source.claims.map((c) => `${CONTROL_SHORT[c.control]} ${c.result}`).join(', ')} (
+          {source.claims.map((c) => `${EVIDENCE_CONTROL_LABELS[c.control]} ${c.result}`).join(', ')} (
           {source.claims[0].visibility === 'published' ? 'External reports' : 'Needs verification'})
         </p>
       )}

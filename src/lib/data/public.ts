@@ -6,7 +6,7 @@ import {
   type ControlSummary,
   type EvidenceItem,
 } from '../aggregate'
-import type { Control, ConnectionType, Result, SourceType } from '../domain'
+import type { Control, ConnectionType, EvidenceControl, Result, SourceType } from '../domain'
 import { missingEvidenceFields } from '../validation'
 
 // Every query in this module returns public data only:
@@ -53,7 +53,7 @@ export async function getFamilyBySlug(sql: Sql, slug: string): Promise<Controlle
 
 type ItemRow = {
   kind: 'direct' | 'external'
-  control: Control
+  control: EvidenceControl
   result: Result
   origin: string
   connection: ConnectionType | null
@@ -67,7 +67,9 @@ type ItemRow = {
 
 export type ScopedItem = EvidenceItem & { gameId: string; familyId: string }
 
-/** Evidence items for aggregation. Direct tests without a catalog controller are excluded. */
+/** Evidence items for aggregation. Direct tests without a catalog controller are excluded,
+ *  and so are external claims that name no controller: a family-less source never creates
+ *  a controller row. It is still listed under External reports. */
 export async function listEvidenceItems(sql: Sql, scope: Scope): Promise<ScopedItem[]> {
   const demoS = scope.includeDemo ? sql`` : sql`and not s.is_demo`
   const demoC = scope.includeDemo ? sql`` : sql`and not c.is_demo`
@@ -93,7 +95,8 @@ export async function listEvidenceItems(sql: Sql, scope: Scope): Promise<ScopedI
     from evidence_claims c
     join evidence_sources src on src.id = c.source_id
     left join controller_variants v on v.id = c.controller_variant_id
-    where c.visibility = 'published' and src.review_status = 'published' ${demoC} ${gameC} ${famC}`
+    where c.visibility = 'published' and src.review_status = 'published'
+      and c.controller_family_id is not null ${demoC} ${gameC} ${famC}`
 
   return rows.map((r) => ({
     kind: r.kind,
@@ -156,6 +159,8 @@ export type DirectTest = {
   deviceName: string | null
   deviceModel: string | null
   androidVersion: string | null
+  /** true = the game detected the controller, false = it did not, null = unknown. */
+  controllerDetected: boolean | null
   testedOn: string
   notes: string | null
   isDemo: boolean
@@ -176,6 +181,7 @@ type DirectRow = {
   device_as_entered: string | null
   device_model_code: string | null
   android_version: string | null
+  controller_detected: boolean | null
   tested_on: string
   notes: string | null
   is_demo: boolean
@@ -200,6 +206,7 @@ export async function hydrateDirectTests(sql: Sql, rows: DirectRow[]): Promise<D
     deviceName: r.device_as_entered,
     deviceModel: r.device_model_code,
     androidVersion: r.android_version,
+    controllerDetected: r.controller_detected,
     testedOn: r.tested_on,
     notes: r.notes,
     isDemo: r.is_demo,
@@ -211,7 +218,7 @@ export const DIRECT_TEST_COLUMNS = (sql: Sql) => sql`
   s.id::text, g.slug as game_slug, g.name as game_name, b.version as game_version,
   f.slug as family_slug, f.name as family_name, v.name as variant_name, s.controller_as_entered,
   s.controller_mode, s.connection_type, s.device_as_entered, s.device_model_code, s.android_version,
-  s.tested_on::text, s.notes, s.is_demo`
+  s.controller_detected, s.tested_on::text, s.notes, s.is_demo`
 
 export const DIRECT_TEST_JOINS = (sql: Sql) => sql`
   from test_sessions s
@@ -241,18 +248,20 @@ export type ExternalReport = {
   publishedOn: string | null
   gameSlug: string
   gameName: string
-  familySlug: string
-  familyName: string
+  /** Null when the source names no controller: shown as "Controller not specified". */
+  familySlug: string | null
+  familyName: string | null
   variantName: string | null
   controllerAsWritten: string | null
   gameVersion: string | null
   androidVersion: string | null
   deviceAsWritten: string | null
   deviceModel: string | null
+  /** The transport every claim of this report agrees on, or null when they differ. */
   connection: ConnectionType | null
   controllerMode: string | null
   isDemo: boolean
-  claims: { control: Control; result: Result; statement: string }[]
+  claims: { control: EvidenceControl; result: Result; statement: string; connection: ConnectionType | null }[]
   missing: string[]
 }
 
@@ -264,8 +273,8 @@ type ClaimRow = {
   published_on: string | null
   game_slug: string
   game_name: string
-  family_slug: string
-  family_name: string
+  family_slug: string | null
+  family_name: string | null
   variant_id: string | null
   variant_name: string | null
   controller_as_written: string | null
@@ -276,11 +285,16 @@ type ClaimRow = {
   connection_type: ConnectionType | null
   controller_mode: string | null
   is_demo: boolean
-  control: Control
+  control: EvidenceControl
   result: Result
   statement: string
 }
 
+/**
+ * One record per source per controller. One source can cover several controllers (the
+ * official HoYoverse list) or several transports, and a source that names no controller
+ * at all still gets a record without a family instead of inventing one.
+ */
 async function listClaims(
   sql: Sql,
   scope: Scope,
@@ -296,7 +310,7 @@ async function listClaims(
     from evidence_claims c
     join evidence_sources src on src.id = c.source_id
     join games g on g.id = c.game_id
-    join controller_families f on f.id = c.controller_family_id
+    left join controller_families f on f.id = c.controller_family_id
     left join controller_variants v on v.id = c.controller_variant_id
     where c.visibility = ${visibility} and src.review_status = ${sourceStatus}
       ${scope.includeDemo ? sql`` : sql`and not c.is_demo`}
@@ -304,45 +318,73 @@ async function listClaims(
       ${scope.familyId ? sql`and c.controller_family_id = ${scope.familyId}` : sql``}
     order by src.published_on desc nulls last, src.added_at desc, c.control`
 
-  const bySource = new Map<string, ExternalReport>()
+  const byKey = new Map<
+    string,
+    {
+      report: Omit<ExternalReport, 'connection' | 'missing'>
+      connections: (ConnectionType | null)[]
+      variantId: string | null
+    }
+  >()
   for (const r of rows) {
-    let report = bySource.get(r.source_id)
-    if (!report) {
-      report = {
-        sourceId: r.source_id,
-        url: r.url,
-        sourceType: r.source_type,
-        title: r.title,
-        publishedOn: r.published_on,
-        gameSlug: r.game_slug,
-        gameName: r.game_name,
-        familySlug: r.family_slug,
-        familyName: r.family_name,
-        variantName: r.variant_name,
-        controllerAsWritten: r.controller_as_written,
-        gameVersion: r.game_version,
-        androidVersion: r.android_version,
-        deviceAsWritten: r.device_as_written,
-        deviceModel: r.device_model_code,
-        connection: r.connection_type,
-        controllerMode: r.controller_mode,
-        isDemo: r.is_demo,
-        claims: [],
-        missing: missingEvidenceFields({
+    const key = `${r.source_id}|${r.family_slug ?? ''}`
+    let entry = byKey.get(key)
+    if (!entry) {
+      entry = {
+        report: {
+          sourceId: r.source_id,
+          url: r.url,
+          sourceType: r.source_type,
+          title: r.title,
+          publishedOn: r.published_on,
+          gameSlug: r.game_slug,
+          gameName: r.game_name,
+          familySlug: r.family_slug,
+          familyName: r.family_name,
+          variantName: r.variant_name,
+          controllerAsWritten: r.controller_as_written,
           gameVersion: r.game_version,
           androidVersion: r.android_version,
           deviceAsWritten: r.device_as_written,
-          deviceModelCode: r.device_model_code,
-          controllerVariantId: r.variant_id,
-          connectionType: r.connection_type,
-          publishedOn: r.published_on,
-        }),
+          deviceModel: r.device_model_code,
+          controllerMode: r.controller_mode,
+          isDemo: r.is_demo,
+          claims: [],
+        },
+        connections: [],
+        variantId: r.variant_id,
       }
-      bySource.set(r.source_id, report)
+      byKey.set(key, entry)
     }
-    report.claims.push({ control: r.control, result: r.result, statement: r.statement })
+    entry.report.claims.push({
+      control: r.control,
+      result: r.result,
+      statement: r.statement,
+      connection: r.connection_type,
+    })
+    entry.connections.push(r.connection_type)
   }
-  return [...bySource.values()]
+
+  return [...byKey.values()].map(({ report, connections, variantId }) => {
+    // One shared transport when the claims agree; null when they differ (a source may
+    // state both Bluetooth and USB) or when none states one. Every claim keeps its own.
+    const shared = connections.every((c) => c === connections[0]) ? connections[0] : null
+    const connectionStated = connections.some((c) => c !== null)
+    return {
+      ...report,
+      connection: shared,
+      missing: missingEvidenceFields({
+        gameVersion: report.gameVersion,
+        androidVersion: report.androidVersion,
+        deviceAsWritten: report.deviceAsWritten,
+        deviceModelCode: report.deviceModel,
+        controllerVariantId: variantId,
+        connectionType: shared,
+        connectionStated,
+        publishedOn: report.publishedOn,
+      }),
+    }
+  })
 }
 
 export function listExternalReports(sql: Sql, scope: Scope) {

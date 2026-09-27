@@ -1,7 +1,15 @@
 import Link from 'next/link'
 import { STATE_LABELS, type ControlState } from '@/lib/aggregate'
 import type { DirectTest, ExternalReport } from '@/lib/data/public'
-import { CONNECTION_LABELS, CONTROL_SHORT, SOURCE_TYPE_LABELS, UNKNOWN, type ConnectionType, type Result } from '@/lib/domain'
+import {
+  CONNECTION_LABELS,
+  CONTROL_SHORT,
+  EVIDENCE_CONTROL_LABELS,
+  SOURCE_TYPE_LABELS,
+  UNKNOWN,
+  type ConnectionType,
+  type Result,
+} from '@/lib/domain'
 import { formatDate } from '@/lib/format'
 import { hostOf } from '@/lib/url'
 
@@ -96,6 +104,9 @@ export function DirectTestRecord({ test, showGame = false }: { test: DirectTest;
           <Fact label="Game version">
             <Value value={test.gameVersion} />
           </Fact>
+          <Fact label="Detected by the game">
+            <Value value={test.controllerDetected === null ? null : test.controllerDetected ? 'Yes' : 'No'} />
+          </Fact>
           <Fact label="Connection">
             <Value value={connectionLabel(test.connection)} />
           </Fact>
@@ -137,10 +148,14 @@ export function ExternalReportRecord({ report, showGame = false }: { report: Ext
               {' · '}
             </>
           )}
-          <Link href={`/games/${report.gameSlug}/${report.familySlug}`}>
-            {report.variantName ?? `${report.familyName}`}
-          </Link>
-          {!report.variantName && <span className="muted"> (model not specified)</span>}{' '}
+          {report.familySlug ? (
+            <Link href={`/games/${report.gameSlug}/${report.familySlug}`}>
+              {report.variantName ?? report.familyName}
+            </Link>
+          ) : (
+            <span>Controller not specified</span>
+          )}
+          {report.familySlug && !report.variantName && <span className="muted"> (model not specified)</span>}{' '}
           <DemoMark show={report.isDemo} />
         </div>
         <p>{report.claims[0]?.statement}</p>
@@ -163,8 +178,9 @@ export function ExternalReportRecord({ report, showGame = false }: { report: Ext
         </dl>
         <ul className="results" aria-label="Reported results">
           {report.claims.map((c) => (
-            <li key={c.control}>
-              {CONTROL_SHORT[c.control]}: <InlineResult result={c.result} reported />
+            <li key={`${c.control}:${c.connection ?? 'none'}`}>
+              {EVIDENCE_CONTROL_LABELS[c.control]}: <InlineResult result={c.result} reported />
+              {c.connection && <span className="muted"> over {CONNECTION_LABELS[c.connection]}</span>}
             </li>
           ))}
         </ul>

@@ -62,16 +62,20 @@ export async function createTestSession(
       insert into test_sessions (
         status, game_id, game_build_id, controller_family_id, controller_variant_id, controller_as_entered,
         device_as_entered, device_model_code, android_version, connection_type, controller_mode,
-        tested_on, notes, submitter_key, submitted_at
+        controller_detected, tested_on, notes, submitter_key, submitted_at
       ) values (
         'pending', ${game.id}, ${buildId}, ${familyId}, ${variantId}, ${input.controllerOther},
         ${input.deviceName}, ${input.deviceModel}, ${input.androidVersion}, ${input.connection}, ${input.controllerMode},
-        ${input.testedOn}, ${input.notes}, ${ctx.submitterKey}, ${now}
+        ${input.controllerDetected}, ${input.testedOn}, ${input.notes}, ${ctx.submitterKey}, ${now}
       ) returning id::text`
-    await tx`
-      insert into test_observations ${tx(
-        input.observations.map((o) => ({ session_id: s.id, control: o.control, result: o.result })),
-      )}`
+    // No control result to store when the tester reported that the game never detected
+    // the controller: the session itself carries that answer.
+    if (input.observations.length > 0) {
+      await tx`
+        insert into test_observations ${tx(
+          input.observations.map((o) => ({ session_id: s.id, control: o.control, result: o.result })),
+        )}`
+    }
     return s.id
   })
 

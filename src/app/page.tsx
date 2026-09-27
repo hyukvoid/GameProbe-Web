@@ -90,7 +90,7 @@ export default async function Home() {
             {requests.length > 0 && (
               <ul className="records">
                 {requests.map((r) => (
-                  <ExternalReportRecord key={r.sourceId} report={r} showGame />
+                  <ExternalReportRecord key={`${r.sourceId}/${r.familySlug ?? ''}`} report={r} showGame />
                 ))}
               </ul>
             )}
