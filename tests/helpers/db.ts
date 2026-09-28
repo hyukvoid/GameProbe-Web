@@ -5,7 +5,7 @@ import { PGLiteSocketServer } from '@electric-sql/pglite-socket'
 import postgres, { type Sql } from 'postgres'
 import { migrate } from '../../scripts/migrate.mjs'
 
-export type TestDb = { sql: Sql; pg: PGlite; close: () => Promise<void> }
+export type TestDb = { sql: Sql; pg: PGlite; port: number; close: () => Promise<void> }
 
 /**
  * A fresh in-memory Postgres per test file, migrated with the real migrations and reached
@@ -40,6 +40,7 @@ export async function createTestDb(opts: { supabaseRoles?: boolean } = {}): Prom
   return {
     sql,
     pg,
+    port,
     close: async () => {
       await sql.end()
       await server.stop()

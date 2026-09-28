@@ -591,11 +591,187 @@ export async function listKnownVersions(sql: Sql, includeDemo: boolean): Promise
 // Search
 // ---------------------------------------------------------------------------
 
+/**
+ * How much controller-specific data exists for one Game × Controller pair. Search reports
+ * data availability only: it never says compatible, works or broken, and never derives a
+ * transport result. The authoritative answer stays on the combination page.
+ */
+export type CombinationEvidenceStatus = 'evidence_available' | 'needs_verification' | 'no_controller_evidence'
+
+export const COMBINATION_STATUS_LABELS: Record<CombinationEvidenceStatus, string> = {
+  evidence_available: 'Compatibility evidence available',
+  needs_verification: 'Needs verification',
+  no_controller_evidence: 'No controller-specific evidence',
+}
+
+/** Strongest data first. */
+const STATUS_ORDER: Record<CombinationEvidenceStatus, number> = {
+  evidence_available: 0,
+  needs_verification: 1,
+  no_controller_evidence: 2,
+}
+
+export type CombinationEvidence = {
+  status: CombinationEvidenceStatus
+  /** Approved test sessions for this exact game and family. */
+  directTests: number
+  /** Distinct published sources for this family, split by source type: one source counts once. */
+  published: { officialSources: number; otherSources: number }
+  /** Distinct reviewed sources for this family flagged as needing a direct test. Not evidence. */
+  verificationSources: number
+  /** Claims that name no controller, for this game. Context only, never promoted. */
+  gameWideContext: { publishedSources: number; verificationSources: number }
+  /** Newest date among decisive controller-specific records (direct tests and published
+   *  family claims). Never a game-wide, other-family or verification-only date. */
+  lastControllerEvidenceDate: string | null
+}
+
+export type CombinationSearchResult = CombinationEvidence & { game: Game; family: ControllerFamily }
+
+export type FamilyCoverage = {
+  directTests: number
+  officialSources: number
+  otherSources: number
+  verificationSources: number
+  lastEvidenceDate: string | null
+}
+
+export type SearchCoverage = {
+  /** Keyed `gameId|familyId`: controller-specific rows only. */
+  family: Map<string, FamilyCoverage>
+  /** Keyed by game id: claims where controller_family_id IS NULL. */
+  gameWide: Map<string, { publishedSources: number; verificationSources: number }>
+}
+
+const EMPTY_FAMILY: FamilyCoverage = {
+  directTests: 0,
+  officialSources: 0,
+  otherSources: 0,
+  verificationSources: 0,
+  lastEvidenceDate: null,
+}
+
+function coverageKey(gameId: string, familyId: string): string {
+  return `${gameId}|${familyId}`
+}
+
+/**
+ * Two aggregate queries for every combination a search can show: approved test sessions by
+ * game and family, and reviewed claims by game, family and visibility. No query per
+ * combination, no N+1, and no row is ever returned to the caller.
+ *
+ * A claim is counted only when its visibility matches its source's review status
+ * ('published'/'published' or 'needs_direct_test'/'needs_direct_test'), and only when it
+ * names a family: a family-less claim lands in `gameWide` and can never reach `family`.
+ *
+ * The two queries are issued one after the other, never two in flight at once: the local
+ * development wire server (PGlite) runs a single Postgres session, so overlapping protocol
+ * messages from concurrent queries can be interleaved and hand one query the other's rows.
+ * Sequential round trips keep every row with the query that produced it under any pool size.
+ */
+export async function listSearchCoverage(
+  sql: Sql,
+  opts: { includeDemo: boolean; familyIds: string[] },
+): Promise<SearchCoverage> {
+  const families = sql(opts.familyIds)
+  const tests = await sql<{ game_id: string; family_id: string; sessions: number; last_date: string | null }[]>`
+    select s.game_id::text as game_id, s.controller_family_id::text as family_id,
+           count(distinct s.id)::int as sessions, max(s.tested_on)::text as last_date
+    from test_sessions s
+    where s.status = 'approved' and s.controller_family_id in ${families}
+      ${opts.includeDemo ? sql`` : sql`and not s.is_demo`}
+    group by 1, 2`
+  const claims = await sql<{
+    game_id: string
+    family_id: string | null
+    visibility: 'published' | 'needs_direct_test'
+    official: boolean
+    sources: number
+    last_date: string | null
+  }[]>`
+    select c.game_id::text as game_id, c.controller_family_id::text as family_id, c.visibility,
+           (src.source_type = 'official') as official, count(distinct src.id)::int as sources,
+           max(case when c.visibility = 'published'
+                    then coalesce(c.reported_on, src.published_on) end)::text as last_date
+    from evidence_claims c
+    join evidence_sources src on src.id = c.source_id
+    where c.visibility = src.review_status
+      and c.visibility in ('published', 'needs_direct_test')
+      and (c.controller_family_id is null or c.controller_family_id in ${families})
+      ${opts.includeDemo ? sql`` : sql`and not c.is_demo`}
+    group by 1, 2, 3, 4`
+
+  const family = new Map<string, FamilyCoverage>()
+  const gameWide = new Map<string, { publishedSources: number; verificationSources: number }>()
+
+  for (const r of tests) {
+    family.set(coverageKey(r.game_id, r.family_id), { ...EMPTY_FAMILY, directTests: r.sessions, lastEvidenceDate: r.last_date })
+  }
+
+  for (const r of claims) {
+    if (r.family_id === null) {
+      const wide = gameWide.get(r.game_id) ?? { publishedSources: 0, verificationSources: 0 }
+      if (r.visibility === 'published') wide.publishedSources += r.sources
+      else wide.verificationSources += r.sources
+      gameWide.set(r.game_id, wide)
+      continue
+    }
+    const key = coverageKey(r.game_id, r.family_id)
+    const row = family.get(key) ?? { ...EMPTY_FAMILY }
+    if (r.visibility === 'published') {
+      if (r.official) row.officialSources += r.sources
+      else row.otherSources += r.sources
+      if (r.last_date && (row.lastEvidenceDate === null || r.last_date > row.lastEvidenceDate)) {
+        row.lastEvidenceDate = r.last_date
+      }
+    } else {
+      row.verificationSources += r.sources
+    }
+    family.set(key, row)
+  }
+
+  return { family, gameWide }
+}
+
+/**
+ * One combination's evidence status. Game-wide context and other families are read here
+ * only for the separate `gameWideContext` field: neither can raise `status`, and neither
+ * can appear in a family's own counts.
+ */
+export function combinationEvidence(coverage: SearchCoverage, gameId: string, familyId: string): CombinationEvidence {
+  const row = coverage.family.get(coverageKey(gameId, familyId)) ?? EMPTY_FAMILY
+  const publishedSources = row.officialSources + row.otherSources
+  const status: CombinationEvidenceStatus =
+    row.directTests > 0 || publishedSources > 0
+      ? 'evidence_available'
+      : row.verificationSources > 0
+        ? 'needs_verification'
+        : 'no_controller_evidence'
+  return {
+    status,
+    directTests: row.directTests,
+    published: { officialSources: row.officialSources, otherSources: row.otherSources },
+    verificationSources: row.verificationSources,
+    gameWideContext: coverage.gameWide.get(gameId) ?? { publishedSources: 0, verificationSources: 0 },
+    lastControllerEvidenceDate: row.lastEvidenceDate,
+  }
+}
+
+export type ControllerGameStatus = { game: Game; status: CombinationEvidenceStatus }
+export type ControllerSearchResult = { family: ControllerFamily; rows: ControllerGameStatus[] }
+
 export type SearchResults = {
   games: Game[]
   families: ControllerFamily[]
-  combinations: { game: Game; family: ControllerFamily }[]
+  /** Game × controller pairs for this query, strongest evidence first, catalog order within a status. */
+  combinations: CombinationSearchResult[]
+  /** Every catalog game under each matched controller, each with its own status. */
+  controllerByGame: ControllerSearchResult[]
   devices: DirectTest[]
+}
+
+function emptySearch(): SearchResults {
+  return { games: [], families: [], combinations: [], controllerByGame: [], devices: [] }
 }
 
 function escapeLike(s: string): string {
@@ -605,6 +781,12 @@ function escapeLike(s: string): string {
 /**
  * Plain Postgres matching over a small dataset. Each word is matched against game names
  * and aliases, controller names and manufacturers, and devices in approved tests.
+ *
+ * Matching is unchanged from the plain-text version: this function only adds evidence
+ * status to the combinations it already produced. Queries run one at a time in small
+ * bounded steps (catalog, then devices, then two aggregates), never one per combination
+ * and never two in flight at once, so the local single-session wire server returns each
+ * result to the query that asked for it.
  */
 export async function search(sql: Sql, query: string, includeDemo: boolean): Promise<SearchResults> {
   const words = query
@@ -613,10 +795,11 @@ export async function search(sql: Sql, query: string, includeDemo: boolean): Pro
     .map((w) => w.replace(/[^\p{L}\p{N}.:-]/gu, ''))
     .filter((w) => w.length >= 2)
     .slice(0, 6)
-  if (words.length === 0) return { games: [], families: [], combinations: [], devices: [] }
+  if (words.length === 0) return emptySearch()
   const patterns = words.map((w) => `%${escapeLike(w)}%`)
 
-  const [games, catalog] = await Promise.all([listGames(sql), listControllerCatalog(sql)])
+  const games = await listGames(sql)
+  const catalog = await listControllerCatalog(sql)
   const gameText = (g: Game) => [g.name, g.slug, ...g.aliases].join(' ').toLowerCase().replace(/[:]/g, '')
   const familyText = (f: ControllerFamily) =>
     [f.manufacturer, f.name, f.slug, ...f.variants.map((v) => v.name)].join(' ').toLowerCase()
@@ -634,10 +817,21 @@ export async function search(sql: Sql, query: string, includeDemo: boolean): Pro
     limit 20`
   const devices = await hydrateDirectTests(sql, deviceRows)
 
-  const combinations =
-    matchedGames.length > 0 && matchedFamilies.length > 0
-      ? matchedGames.flatMap((game) => matchedFamilies.map((family) => ({ game, family })))
-      : []
+  const coverage: SearchCoverage = matchedFamilies.length
+    ? await listSearchCoverage(sql, { includeDemo, familyIds: matchedFamilies.map((f) => f.id) })
+    : { family: new Map(), gameWide: new Map() }
+  const evidence = (game: Game, family: ControllerFamily) => combinationEvidence(coverage, game.id, family.id)
 
-  return { games: matchedGames, families: matchedFamilies, combinations, devices }
+  const combinations = matchedGames.flatMap((game) =>
+    matchedFamilies.map((family) => ({ game, family, ...evidence(game, family) })),
+  )
+  // Stable: within a status the pairs stay in catalog order (games by name, then controllers).
+  combinations.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
+
+  const controllerByGame = matchedFamilies.map((family) => ({
+    family,
+    rows: games.map((game) => ({ game, status: evidence(game, family).status })),
+  }))
+
+  return { games: matchedGames, families: matchedFamilies, combinations, controllerByGame, devices }
 }

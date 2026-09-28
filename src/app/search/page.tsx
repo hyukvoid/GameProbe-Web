@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { DirectTestRecord } from '@/components/evidence'
+import { CombinationResult, CompatibilityByGame } from '@/components/search'
 import { listGames, search } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
 
@@ -12,7 +13,11 @@ export default async function SearchPage({ searchParams }: Props) {
   const raw = (await searchParams).q
   const q = (Array.isArray(raw) ? raw[0] : raw ?? '').trim().slice(0, 100)
   const sql = await requestDb()
-  const [results, games] = await Promise.all([search(sql, q, includeDemoData()), listGames(sql)])
+  // Sequential, not Promise.all: the local development database serves every connection
+  // from one Postgres session, so two queries in flight at once can receive each other's
+  // rows. One request runs one query at a time.
+  const results = await search(sql, q, includeDemoData())
+  const games = await listGames(sql)
   const nothing =
     results.games.length === 0 && results.families.length === 0 && results.devices.length === 0
 
@@ -42,12 +47,8 @@ export default async function SearchPage({ searchParams }: Props) {
         <section className="first" aria-labelledby="combo-heading">
           <h2 id="combo-heading">Game and controller</h2>
           <ul className="records">
-            {results.combinations.map(({ game, family }) => (
-              <li key={`${game.id}-${family.id}`} className="empty">
-                <Link href={`/games/${game.slug}/${family.slug}`}>
-                  {family.name} in {game.name}
-                </Link>
-              </li>
+            {results.combinations.map((result) => (
+              <CombinationResult key={`${result.game.id}-${result.family.id}`} result={result} />
             ))}
           </ul>
         </section>
@@ -66,7 +67,7 @@ export default async function SearchPage({ searchParams }: Props) {
         </section>
       )}
 
-      {results.families.length > 0 && (
+      {results.controllerByGame.length > 0 && (
         <section aria-labelledby="controllers-heading">
           <h2 id="controllers-heading">Controllers</h2>
           <table className="stack">
@@ -78,20 +79,14 @@ export default async function SearchPage({ searchParams }: Props) {
               </tr>
             </thead>
             <tbody>
-              {results.families.map((f) => (
-                <tr key={f.id}>
+              {results.controllerByGame.map(({ family, rows }) => (
+                <tr key={family.id}>
                   <td className="primary" data-label="Controller">
-                    {f.name}
+                    {family.name}
                   </td>
-                  <td data-label="Models">{f.variants.map((v) => v.name).join(', ') || <span className="muted">None</span>}</td>
+                  <td data-label="Models">{family.variants.map((v) => v.name).join(', ') || <span className="muted">None</span>}</td>
                   <td data-label="By game">
-                    <ul className="results">
-                      {games.map((g) => (
-                        <li key={g.id}>
-                          <Link href={`/games/${g.slug}/${f.slug}`}>{g.name}</Link>
-                        </li>
-                      ))}
-                    </ul>
+                    <CompatibilityByGame family={family} rows={rows} />
                   </td>
                 </tr>
               ))}

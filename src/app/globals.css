@@ -207,6 +207,9 @@ tbody tr:hover { background: #f9f9f6; }
 /* External-only states: outlined rather than filled, so they read as weaker. */
 .state-reported { background: transparent; border-color: currentColor; font-weight: 500; }
 .state-verify { color: var(--verify); background: var(--verify-bg); }
+/* Search evidence availability: how much data exists, never a compatibility verdict. */
+.state-evidence { color: var(--ink); background: var(--surface); border-color: var(--rule-strong); }
+.state-no-evidence { color: var(--muted); background: var(--unknown-bg); border-color: var(--rule); }
 
 .results { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .results li { white-space: nowrap; }
