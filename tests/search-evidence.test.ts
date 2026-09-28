@@ -136,12 +136,12 @@ describe('evidence available', () => {
     expect(e.published.officialSources).toBe(1)
   })
 
-  it('3. a published controller-specific non-official claim', () => {
+  it('3. published controller-specific claims from fixture and catalog', () => {
     const e = evidence('wuthering-waves', 'sony-dualsense')
     expect(e).toMatchObject({
       status: 'evidence_available',
       directTests: 0,
-      published: { officialSources: 0, otherSources: 1 },
+      published: { officialSources: 2, otherSources: 1 },
     })
   })
 
@@ -151,10 +151,11 @@ describe('evidence available', () => {
       where game_id = ${id.game('wuthering-waves').id}
         and controller_family_id = ${id.family('sony-dualshock-4').id}
         and connection_type is null and visibility = 'published'`
-    expect(stored[0].n).toBe(1)
+    // The catalog now contributes the two official 3.5/3.4 notices alongside the fixture.
+    expect(stored[0].n).toBe(3)
     expect(evidence('wuthering-waves', 'sony-dualshock-4')).toMatchObject({
       status: 'evidence_available',
-      published: { officialSources: 0, otherSources: 1 },
+      published: { officialSources: 2, otherSources: 1 },
     })
   })
 })
@@ -179,7 +180,8 @@ describe('no controller evidence', () => {
       directTests: 0,
       published: { officialSources: 0, otherSources: 0 },
       verificationSources: 0,
-      gameWideContext: { publishedSources: 0, verificationSources: 0 },
+      // The catalog's familyless direct-test source (hsr-help) is game-wide context only.
+      gameWideContext: { publishedSources: 0, verificationSources: 1 },
       lastControllerEvidenceDate: null,
     })
   })
@@ -195,7 +197,8 @@ describe('no controller evidence', () => {
     const e = evidence('wuthering-waves', 'razer-kishi')
     expect(e.status).toBe('no_controller_evidence')
     expect(e.verificationSources).toBe(0)
-    expect(e.gameWideContext).toEqual({ publishedSources: 0, verificationSources: 1 })
+    // siliconera is published and familyless; the fixture stays verification-only.
+    expect(e.gameWideContext).toEqual({ publishedSources: 1, verificationSources: 1 })
   })
 
   it('10. evidence for another controller family never counts for this one', () => {
@@ -266,8 +269,9 @@ describe('last evidence date', () => {
   it('follows the newest decisive controller-specific record only', () => {
     // The newer game-wide source (2025-12-01) must not win over the family claim.
     expect(evidence('genshin-impact', 'sony-dualsense').lastControllerEvidenceDate).toBe('2025-09-17')
-    // The game-wide request dated 2026-01-15 must not win over the family claim either.
-    expect(evidence('wuthering-waves', 'sony-dualsense').lastControllerEvidenceDate).toBe('2025-11-02')
+    // The game-wide request dated 2026-01-15 must not win over the family claim either,
+    // and the catalog's official 3.5 notice (2026-07-03) is newer than the fixture.
+    expect(evidence('wuthering-waves', 'sony-dualsense').lastControllerEvidenceDate).toBe('2026-07-03')
     // Verification-only and game-wide-only combinations have no decisive evidence date.
     expect(evidence('honkai-star-rail', 'sony-dualsense').lastControllerEvidenceDate).toBeNull()
     expect(evidence('wuthering-waves', 'razer-kishi').lastControllerEvidenceDate).toBeNull()
@@ -327,9 +331,21 @@ describe('existing search behavior', () => {
     expect(r.combinations).toEqual([])
     expect(r.controllerByGame).toHaveLength(1)
     expect(r.controllerByGame[0].rows.map((row) => [row.game.slug, row.status])).toEqual([
+      ['alien-isolation', 'evidence_available'],
+      ['brawlhalla', 'no_controller_evidence'],
+      ['call-of-duty-mobile', 'evidence_available'],
+      ['dead-cells', 'no_controller_evidence'],
+      ['diablo-immortal', 'evidence_available'],
+      ['fortnite', 'no_controller_evidence'],
+      ['grid-autosport', 'evidence_available'],
       ['genshin-impact', 'evidence_available'],
       ['honkai-star-rail', 'needs_verification'],
+      ['minecraft', 'no_controller_evidence'],
+      ['roblox', 'no_controller_evidence'],
+      ['stardew-valley', 'no_controller_evidence'],
+      ['terraria', 'no_controller_evidence'],
       ['wuthering-waves', 'evidence_available'],
+      ['zenless-zone-zero', 'evidence_available'],
     ])
   })
 
@@ -413,9 +429,21 @@ describe('development pool size', () => {
 
     const byGame = await search(pooled, 'dualsense', false)
     expect(byGame.controllerByGame[0].rows.map((r) => [r.game.slug, r.status])).toEqual([
+      ['alien-isolation', 'evidence_available'],
+      ['brawlhalla', 'no_controller_evidence'],
+      ['call-of-duty-mobile', 'evidence_available'],
+      ['dead-cells', 'no_controller_evidence'],
+      ['diablo-immortal', 'evidence_available'],
+      ['fortnite', 'no_controller_evidence'],
+      ['grid-autosport', 'evidence_available'],
       ['genshin-impact', 'evidence_available'],
       ['honkai-star-rail', 'needs_verification'],
+      ['minecraft', 'no_controller_evidence'],
+      ['roblox', 'no_controller_evidence'],
+      ['stardew-valley', 'no_controller_evidence'],
+      ['terraria', 'no_controller_evidence'],
       ['wuthering-waves', 'evidence_available'],
+      ['zenless-zone-zero', 'evidence_available'],
     ])
 
     const devices = await search(pooled, 'SM-S931B', false)

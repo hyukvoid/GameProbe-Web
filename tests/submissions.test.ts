@@ -37,7 +37,9 @@ describe('direct test submission', () => {
     const [row] = await t.sql`select status from test_sessions`
     expect(row.status).toBe('pending')
     expect(await listDirectTests(t.sql, scope)).toEqual([])
-    expect(await listEvidenceItems(t.sql, scope)).toEqual([])
+    // The catalog's real evidence stays; the pending submission adds no direct item.
+    const items = await listEvidenceItems(t.sql, scope)
+    expect(items.filter((i) => i.kind === 'direct')).toEqual([])
     expect((await listTestsByStatus(t.sql, 'pending')).length).toBe(1)
   })
 
@@ -100,7 +102,7 @@ describe('direct test submission', () => {
     expect(r.ok).toBe(false)
     const bad = await createTestSession(
       t.sql,
-      { ...parsed({ controller: `family:${id.family('sony-dualsense').id}`, result_menu: 'works' }), gameSlug: 'minecraft' },
+      { ...parsed({ controller: `family:${id.family('sony-dualsense').id}`, result_menu: 'works' }), gameSlug: 'league-of-legends' },
       { submitterKey: null },
     )
     expect(!bad.ok && bad.errors.game).toBeTruthy()
@@ -135,13 +137,14 @@ describe('direct test submission', () => {
     )
     if (!r.ok || !r.id) throw new Error('submit failed')
     await moderateTest(t.sql, { id: r.id, decision: 'approve', note: null, controller: { kind: 'none' } })
-    expect(await listEvidenceItems(t.sql, scope)).toEqual([])
+    // The catalog's external rows stay; the free-text session contributes no direct row.
+    expect((await listEvidenceItems(t.sql, scope)).filter((i) => i.kind === 'direct')).toEqual([])
     expect((await listDirectTests(t.sql, scope))[0].controllerAsEntered).toBe('Unknown pad')
 
     const family = id.family('gamesir-g8')
     await moderateTest(t.sql, { id: r.id, decision: 'approve', note: null, controller: { kind: 'family', familyId: family.id } })
-    const combos = combine(await listEvidenceItems(t.sql, scope))
-    expect(combos.map((c) => c.familyId)).toEqual([family.id])
+    const direct = (await listEvidenceItems(t.sql, scope)).filter((i) => i.kind === 'direct')
+    expect(combine(direct).map((c) => c.familyId)).toEqual([family.id])
   })
 
   it('preserves contradictions between approved direct tests', async () => {
@@ -160,7 +163,10 @@ describe('direct test submission', () => {
       if (!r.ok || !r.id) throw new Error('submit failed')
       await moderateTest(t.sql, { id: r.id, decision: 'approve', note: null, controller: { kind: 'none' } })
     }
-    const [combo] = combine(await listEvidenceItems(t.sql, scope))
+    // The sessions' own combination, not whichever the catalog rows produce first.
+    const combo = combine(await listEvidenceItems(t.sql, scope)).find(
+      (c) => c.gameId === id.game('wuthering-waves').id && c.familyId === family,
+    )!
     const triggers = combo.summaries.find((s) => s.control === 'triggers')!
     expect(triggers.state).toBe('conflicting')
     expect(triggers.direct).toEqual({ works: 1, broken: 1 })

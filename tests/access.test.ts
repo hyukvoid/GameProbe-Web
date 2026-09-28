@@ -38,9 +38,23 @@ describe('development fixtures', () => {
   afterAll(() => t.close())
 
   it('are hidden from public queries unless demo data is enabled', async () => {
+    // Direct tests: every fixture session is demo, so none survive the filter.
     expect(await listDirectTests(t.sql, { includeDemo: false })).toEqual([])
-    expect(await listExternalReports(t.sql, { includeDemo: false })).toEqual([])
-    expect(await listEvidenceItems(t.sql, { includeDemo: false })).toEqual([])
+
+    // The real catalog evidence is present, and no fixture URL leaks into it.
+    const realReports = await listExternalReports(t.sql, { includeDemo: false })
+    expect(realReports.length).toBeGreaterThan(0)
+    expect(realReports.every((r) => !r.isDemo)).toBe(true)
+    expect(realReports.some((r) => r.url.includes('gameprobe-fixture'))).toBe(false)
+    const realItems = await listEvidenceItems(t.sql, { includeDemo: false })
+    expect(realItems.length).toBeGreaterThan(0)
+
+    // Demo mode adds the fixtures on top of the real rows.
+    const demoReports = await listExternalReports(t.sql, { includeDemo: true })
+    expect(demoReports.length).toBeGreaterThan(realReports.length)
+    expect(demoReports.some((r) => r.isDemo && r.url.includes('gameprobe-fixture'))).toBe(true)
+    const demoItems = await listEvidenceItems(t.sql, { includeDemo: true })
+    expect(demoItems.length).toBeGreaterThan(realItems.length)
 
     const shown = await listDirectTests(t.sql, { includeDemo: true })
     expect(shown.length).toBe(5)
@@ -56,8 +70,9 @@ describe('development fixtures', () => {
     const ww = games.find((g) => g.slug === 'wuthering-waves')!
     const [overview] = gameOverviews([ww], combos)
     expect(overview.directTests).toBe(3)
-    // The repost is a duplicate and is not counted.
-    expect(overview.externalReports).toBe(1)
+    // One fixture report on 8BitDo Ultimate 2, plus the two official 3.5 notices on
+    // Xbox, DualShock 4 and DualSense (familyless sources never become a combination).
+    expect(overview.externalReports).toBe(7)
 
     const eight = combos.find((c) => c.gameId === ww.id && c.directTests === 2)!
     const triggers = eight.summaries.find((s) => s.control === 'triggers')!

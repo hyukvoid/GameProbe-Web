@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
-// One ordered flow against an empty database: submit a direct test, confirm it stays
-// hidden until approved, then publish an external report and check the two stay separate.
+// One ordered flow against a freshly migrated database: the catalog is populated but no
+// direct test exists yet, so the home page shows honest empty states rather than filler.
+// The flow then submits a test, confirms it stays hidden until approved, publishes an
+// external report and checks the two stay separate.
 test.describe.configure({ mode: 'serial' })
 
 async function signIn(page: Page) {
@@ -11,10 +13,10 @@ async function signIn(page: Page) {
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
 }
 
-test('empty database shows honest empty states, not filler', async ({ page }) => {
+test('catalog data with no tests shows honest empty states, not filler', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('link', { name: 'GameProbe' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Wuthering Waves' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Wuthering Waves', exact: true })).toBeVisible()
   await expect(page.getByText('No direct tests yet.')).toBeVisible()
   await expect(page.getByText(/verified (direct )?tests?/i)).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Submit a test' }).first()).toBeVisible()

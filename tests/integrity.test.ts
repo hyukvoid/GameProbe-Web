@@ -164,7 +164,10 @@ describe('application flows under the new constraints', () => {
     if (!review.ok) throw new Error(JSON.stringify(review.errors))
     expect((await reviewEvidence(t.sql, source.id, review.value)).ok).toBe(true)
 
-    const [report] = await listExternalReports(t.sql, { includeDemo: false })
+    // Find this test's own report: the catalog holds newer published sources first.
+    const report = (await listExternalReports(t.sql, { includeDemo: false })).find(
+      (r) => r.url === 'https://forum.example.org/integrity-flow',
+    )
     expect(report).toMatchObject({ variantName: '8BitDo Ultimate 2 Wireless Controller', gameVersion: '2.8.1', androidVersion: '16' })
     const combo = combine(await listEvidenceItems(t.sql, { includeDemo: false })).find((c) => c.familyId === variant.family_id)
     expect(combo?.directTests).toBe(1)
@@ -415,12 +418,16 @@ describe('external report grouping', () => {
     // The family-less source never becomes a controller row.
     expect(items.filter((i) => i.origin === unnamed)).toEqual([])
 
-    const xbox = combine(items).find((c) => c.familyId === id.family(xboxFamily).id)
+    const genshin = id.game('genshin-impact').id
+    const xbox = combine(items).find(
+      (c) => c.gameId === genshin && c.familyId === id.family(xboxFamily).id,
+    )
     const [{ n }] = await t.sql<{ n: number }[]>`
       select count(distinct c.source_id)::int as n
       from evidence_claims c
       join evidence_sources s on s.id = c.source_id
       where c.controller_family_id = ${id.family(xboxFamily).id}
+        and c.game_id = ${genshin}
         and c.visibility = 'published' and not c.is_demo and s.review_status = 'published'`
     // Two wording records from one source still count as one external report.
     expect(xbox?.externalReports).toBe(n)
