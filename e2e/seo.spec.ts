@@ -112,6 +112,50 @@ test('the game page header shows a header-sized tile', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Genshin Impact' })).toBeVisible()
 })
 
+test('game page artwork renders beside the text only where approved', async ({ page }) => {
+  await page.goto('/games/dead-cells')
+  const art = page.locator('[data-game-artwork="dead-cells"]')
+  await expect(art).toBeVisible()
+  const img = art.locator('img')
+  await expect
+    .poll(() => img.evaluate((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0))
+    .toBe(true)
+  // Restrained region: ~340px wide, 16:9 inside the header's height budget.
+  const box = await art.boundingBox()
+  expect(box!.width).toBeGreaterThan(300)
+  expect(box!.width).toBeLessThanOrEqual(380)
+  expect(box!.height).toBeGreaterThanOrEqual(170)
+  expect(box!.height).toBeLessThanOrEqual(220)
+  await expect(page.getByRole('heading', { level: 1, name: 'Dead Cells' })).toBeVisible()
+  await expect(page.locator('.game-head-text')).toBeVisible()
+  // A game without approved artwork has no shell, empty region, or placeholder hero.
+  await page.goto('/games/genshin-impact')
+  await expect(page.locator('[data-game-artwork]')).toHaveCount(0)
+  await expect(page.locator('.game-artwork')).toHaveCount(0)
+  await expect(page.getByRole('heading', { level: 1, name: 'Genshin Impact' })).toBeVisible()
+})
+
+test('a failed artwork request removes the region instead of breaking', async ({ page }) => {
+  await page.route('**/_next/image**', (route) => route.abort())
+  await page.goto('/games/dead-cells')
+  // The artwork unmounts entirely and the logo falls back to its tile: no broken icon,
+  // no oversized substitute, and the text header stays complete.
+  await expect(page.locator('[data-game-artwork]')).toHaveCount(0, { timeout: 10_000 })
+  await expect(page.locator('[data-game-thumb="dead-cells"][data-thumb-kind="tile"]')).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByRole('heading', { level: 1, name: 'Dead Cells' })).toBeVisible()
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => [...document.images].filter((i) => i.complete && i.naturalWidth === 0).length,
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(0)
+})
+
 test('no page shows a broken image', async ({ page }) => {
   for (const path of ['/', '/search?q=dualsense', '/games/genshin-impact', '/games/zenless-zone-zero/sony-dualsense']) {
     await page.goto(path)

@@ -7,6 +7,8 @@ for (const path of [
   '/games/wuthering-waves/8bitdo-ultimate-2',
   // Thumbnail pages: the header tile must not widen the layout on a phone.
   '/games/genshin-impact',
+  // Artwork pages: the image must drop below the text without widening the layout.
+  '/games/dead-cells',
   '/games/zenless-zone-zero/sony-dualsense',
   '/submit',
   '/search?q=8bitdo',

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DirectTestRecord, EmptyTests, ExternalReportRecord, StateLabel } from '@/components/evidence'
+import { GameArtwork } from '@/components/game-artwork'
 import { GameThumb } from '@/components/game-thumb'
 import { IssueTable } from '@/components/issues'
 import { isIssue } from '@/lib/aggregate'
@@ -71,15 +72,18 @@ export default async function GamePage({ params }: Props) {
 
   return (
     <main id="main">
-      <div className="page-head">
-        <div className="page-head-title">
-          <GameThumb slug={game.slug} size="header" />
-          <h1>{game.name}</h1>
+      <div className="game-head">
+        <div className="game-head-text">
+          <div className="page-head-title">
+            <GameThumb slug={game.slug} size="header" />
+            <h1>{game.name}</h1>
+          </div>
+          {game.aliases.length > 0 && <p className="meta">Also searched as {game.aliases.join(', ')}</p>}
+          <div className="page-actions">
+            <Link href={submitHref}>Submit a test for {game.name}</Link>
+          </div>
         </div>
-        {game.aliases.length > 0 && <p className="meta">Also searched as {game.aliases.join(', ')}</p>}
-        <div className="page-actions">
-          <Link href={submitHref}>Submit a test for {game.name}</Link>
-        </div>
+        <GameArtwork slug={game.slug} />
       </div>
 
       <section className="first" aria-labelledby="controllers-heading">

@@ -225,6 +225,43 @@ tbody tr:hover { background: #f9f9f6; }
   .game-thumb-header .game-thumb-initials { font-size: 1.5rem; }
 }
 
+/* ---- Game page header ------------------------------------------------------------- */
+/* The title block stays primary; one restrained 16:9 artwork region sits beside it on
+   wide screens (340px of a ~960px page - well under half the header width) and drops
+   below the text on small screens, capped at 210px so compatibility data stays close.
+   Never a banner, hero, background, carousel, or text-over-image: one image only. */
+
+.game-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 24px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+.game-head-text { display: grid; gap: 6px; min-width: 0; }
+.game-head-text .meta { color: var(--muted); }
+
+/* The artwork column sizes itself. Without artwork the auto track collapses to zero:
+   the header renders as full-width text with no empty shell. If the image fails at
+   runtime the component unmounts the region, which collapses the same way. */
+.game-artwork { width: 340px; max-width: 100%; justify-self: end; }
+.game-artwork-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 210px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+@media (max-width: 720px) {
+  .game-head { grid-template-columns: 1fr; }
+  .game-artwork { width: 100%; justify-self: stretch; }
+}
+
 /* ---- Result states ---------------------------------------------------------------- */
 
 .state {

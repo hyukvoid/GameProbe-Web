@@ -78,8 +78,11 @@ export default function AboutPage() {
             </a>
             . The other logos are public-domain text logos or come from an official press kit. The Diablo Immortal
             logo comes from Blizzard’s official press center, credited to Blizzard Entertainment as that source
-            requires. Game names, logos and trademarks belong to their owners; they appear here only to identify the
-            games this reference site covers, with no endorsement implied.
+            requires. The large artwork on game pages comes from official press kits too: the Dead Cells key art is
+            from Motion Twin’s press kit, credited to Motion Twin, and the Diablo Immortal key art comes from
+            Blizzard’s official press center, credited to Blizzard Entertainment. Game names, logos and trademarks
+            belong to their owners; they appear here only to identify the games this reference site covers, with no
+            endorsement implied.
           </p>
         </section>
       </div>
