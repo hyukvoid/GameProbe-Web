@@ -62,6 +62,26 @@ export default function AboutPage() {
             field may be published.
           </p>
         </section>
+
+        <section>
+          <h2>Image credits</h2>
+          <p style={{ marginTop: 8 }}>
+            The small game logos in the game lists come from the sources recorded in this site’s code. Two Wikimedia
+            Commons files are used under Creative Commons licenses, cropped and resized to a square tile: the Alien:
+            Isolation logo by Jesmar under{' '}
+            <a href="https://creativecommons.org/licenses/by-sa/3.0/" rel="noopener noreferrer">
+              CC BY-SA 3.0
+            </a>
+            , and the Brawlhalla logo by Blue Mammoth Games under{' '}
+            <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="noopener noreferrer">
+              CC BY-SA 4.0
+            </a>
+            . The other logos are public-domain text logos or come from an official press kit. The Diablo Immortal
+            logo comes from Blizzard’s official press center, credited to Blizzard Entertainment as that source
+            requires. Game names, logos and trademarks belong to their owners; they appear here only to identify the
+            games this reference site covers, with no endorsement implied.
+          </p>
+        </section>
       </div>
     </main>
   )

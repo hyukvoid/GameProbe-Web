@@ -121,3 +121,37 @@ test('no page shows a broken image', async ({ page }) => {
     expect(broken, `broken images on ${path}`).toBe(0)
   }
 })
+
+test('rights-cleared game artwork loads locally in the fixed tile box', async ({ page }) => {
+  await page.goto('/')
+  const images = page.locator('section[aria-labelledby="games-heading"] [data-thumb-kind="image"] img')
+  const count = await images.count()
+  expect(count).toBeGreaterThan(0)
+  await expect
+    .poll(() =>
+      images.evaluateAll((els) =>
+        (els as HTMLImageElement[]).filter((i) => i.complete && i.naturalWidth > 0).length,
+      ),
+    )
+    .toBe(count)
+  // Artwork never changes the layout: the box stays the fixed 48px list square.
+  const box = await page
+    .locator('section[aria-labelledby="games-heading"] [data-game-thumb]')
+    .first()
+    .boundingBox()
+  expect(box?.width).toBe(48)
+  expect(box?.height).toBe(48)
+})
+
+test('a failed artwork request falls back to the initials tile', async ({ page }) => {
+  await page.route('**/_next/image**', (route) => route.abort())
+  await page.goto('/')
+  const thumbs = page.locator('section[aria-labelledby="games-heading"] [data-game-thumb]')
+  const rows = await thumbs.count()
+  expect(rows).toBeGreaterThan(0)
+  // Every artwork error swaps back to the tile; no <img> survives to show a broken icon.
+  await expect(
+    page.locator('section[aria-labelledby="games-heading"] [data-thumb-kind="tile"]'),
+  ).toHaveCount(rows, { timeout: 10_000 })
+  await expect(page.locator('section[aria-labelledby="games-heading"] [data-game-thumb] img')).toHaveCount(0)
+})

@@ -25,26 +25,130 @@ const PLACEHOLDER_RIGHTS =
   'No third-party artwork, logos or store thumbnails are used.'
 
 /**
- * All 15 catalog games, in catalog-name order. No game has a rights-cleared image yet,
- * so every entry ships as the placeholder tile; add `image` plus `sourceUrl`/`rightsNote`
- * only when the reuse basis is clear.
+ * All 15 catalog games, in catalog-name order. A game ships as `licensed-image` only when
+ * a reuse basis was established (official press asset, or a Wikimedia Commons file page
+ * with an explicit reusable license); everything else stays the placeholder tile. Every
+ * real image records where it came from (`sourceUrl`) and why it may be used
+ * (`rightsNote`), so the provenance lives next to the metadata it describes.
  */
 export const GAME_MEDIA: readonly GameMedia[] = [
-  { slug: 'alien-isolation', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'brawlhalla', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'call-of-duty-mobile', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'dead-cells', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'diablo-immortal', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'fortnite', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'genshin-impact', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'grid-autosport', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'honkai-star-rail', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'minecraft', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'roblox', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'stardew-valley', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'terraria', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'wuthering-waves', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
-  { slug: 'zenless-zone-zero', kind: 'placeholder', alt: '', rightsNote: PLACEHOLDER_RIGHTS },
+  {
+    slug: 'alien-isolation',
+    image: '/games/alien-isolation.webp',
+    alt: 'Alien: Isolation',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Alien_Isolation_Logo.svg',
+    rightsNote:
+      'Alien: Isolation logo by Jesmar on Wikimedia Commons, licensed CC BY-SA 3.0 (the file page also tags it PD-textlogo); cropped and resized for a square tile and credited on the About page. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'brawlhalla',
+    image: '/games/brawlhalla.webp',
+    alt: 'Brawlhalla',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Brawlhalla_Logo.png',
+    rightsNote:
+      'Brawlhalla logo (author: Blue Mammoth Games) on Wikimedia Commons, licensed CC BY-SA 4.0; trimmed and resized for a square tile and credited on the About page. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'call-of-duty-mobile',
+    image: '/games/call-of-duty-mobile.webp',
+    alt: 'Call of Duty: Mobile',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Call_of_Duty_Mobile_2023_logo.svg',
+    rightsNote:
+      'Call of Duty: Mobile logo from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality), traced from the official Call of Duty website; trademark of Activision, used only to identify the game. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'dead-cells',
+    image: '/games/dead-cells.webp',
+    alt: 'Dead Cells',
+    kind: 'licensed-image',
+    sourceUrl: 'https://motiontwin.com/presskit/81',
+    rightsNote:
+      'Dead Cells logo from the "Logo & Icon" section of Motion Twin’s official press kit, published for press and media use; © Motion Twin, used only to identify the game. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'diablo-immortal',
+    image: '/games/diablo-immortal.webp',
+    alt: 'Diablo Immortal',
+    kind: 'licensed-image',
+    sourceUrl: 'https://blizzard.gamespress.com/Diablo-Immortal',
+    rightsNote:
+      'Diablo Immortal logo from Blizzard’s official press center (Games Press); the platform’s use-of-assets terms allow using its PR material to support editorial content relating to the product, with photo credits required. © Blizzard Entertainment, credited on the About page. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'fortnite',
+    kind: 'placeholder',
+    alt: '',
+    rightsNote: PLACEHOLDER_RIGHTS,
+  },
+  {
+    slug: 'genshin-impact',
+    image: '/games/genshin-impact.webp',
+    alt: 'Genshin Impact',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Genshin_Impact_wordmark.svg',
+    rightsNote:
+      'Genshin Impact wordmark from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of miHoYo/HoYoverse, used only to identify the game. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'grid-autosport',
+    kind: 'placeholder',
+    alt: '',
+    rightsNote: PLACEHOLDER_RIGHTS,
+  },
+  {
+    slug: 'honkai-star-rail',
+    kind: 'placeholder',
+    alt: '',
+    rightsNote: PLACEHOLDER_RIGHTS,
+  },
+  {
+    slug: 'minecraft',
+    image: '/games/minecraft.webp',
+    alt: 'Minecraft',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Minecraft_Logo-en.svg',
+    rightsNote:
+      'Minecraft logo (author: Mojang Studios, taken from Mojang’s published brand assets) on Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality in Sweden); trademark of Mojang/Microsoft, used only to identify the game. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'roblox',
+    kind: 'placeholder',
+    alt: '',
+    rightsNote: PLACEHOLDER_RIGHTS,
+  },
+  {
+    slug: 'stardew-valley',
+    kind: 'placeholder',
+    alt: '',
+    rightsNote: PLACEHOLDER_RIGHTS,
+  },
+  {
+    slug: 'terraria',
+    kind: 'placeholder',
+    alt: '',
+    rightsNote: PLACEHOLDER_RIGHTS,
+  },
+  {
+    slug: 'wuthering-waves',
+    image: '/games/wuthering-waves.webp',
+    alt: 'Wuthering Waves',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Wuthering_Waves_logo.svg',
+    rightsNote:
+      'Wuthering Waves logo from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of Kuro Games, used only to identify the game. Accessed 2026-09-29.',
+  },
+  {
+    slug: 'zenless-zone-zero',
+    image: '/games/zenless-zone-zero.webp',
+    alt: 'Zenless Zone Zero',
+    kind: 'licensed-image',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Zenless_Zone_Zero_wordmark.svg',
+    rightsNote:
+      'Zenless Zone Zero wordmark from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of miHoYo/HoYoverse, used only to identify the game. Accessed 2026-09-29.',
+  },
 ]
 
 const BY_SLUG = new Map(GAME_MEDIA.map((m) => [m.slug, m]))
@@ -74,11 +178,13 @@ export type GameThumbPlan =
 
 /**
  * What to render for one game. An image is used only when the media entry is a licensed
- * image with a non-empty path; a missing path, an empty path or unknown metadata all fall
- * back to the placeholder tile. Nothing here can produce a broken image element.
+ * image with a non-empty *local* path (`/...`); a missing path, an empty path, a remote
+ * URL (never hotlink third-party servers) or unknown metadata all fall back to the
+ * placeholder tile. Nothing here can produce a broken image element.
  */
 export function gameThumbPlan(media: GameMedia): GameThumbPlan {
-  if (media.kind === 'licensed-image' && media.image) {
+  const local = media.image?.startsWith('/') && !media.image.startsWith('//')
+  if (media.kind === 'licensed-image' && media.image && local) {
     return { kind: 'image', src: media.image, alt: media.alt }
   }
   return { kind: 'tile', initials: gameInitials(media.slug) }
