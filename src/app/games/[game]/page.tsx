@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DirectTestRecord, EmptyTests, ExternalReportRecord, StateLabel } from '@/components/evidence'
+import { GameThumb } from '@/components/game-thumb'
 import { IssueTable } from '@/components/issues'
 import { isIssue } from '@/lib/aggregate'
 import {
@@ -18,13 +19,29 @@ import {
 import { includeDemoData, requestDb } from '@/lib/db'
 import { EVIDENCE_CONTROL_SHORT } from '@/lib/domain'
 import { formatDate } from '@/lib/format'
+import {
+  gameMetadata,
+  indexRobots,
+  indexabilityOverview,
+  ZERO_INDEX_SIGNALS,
+} from '@/lib/seo'
+import { siteOrigin } from '@/lib/site'
 
 type Props = { params: Promise<{ game: string }> }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const sql = await requestDb()
   const game = await getGameBySlug(sql, (await params).game)
-  return { title: game ? `${game.name} controller compatibility` : 'Game not found' }
+  if (!game) return { title: 'Game not found', robots: indexRobots(false) }
+  // One small aggregate after the lookup, run on its own: metadata and page render never
+  // put more queries in flight here than before, and the indexability rule reads exactly
+  // the evidence the page shows.
+  const overview = await indexabilityOverview(sql, includeDemoData())
+  return gameMetadata({
+    origin: await siteOrigin(),
+    game,
+    signals: overview.games.get(game.id) ?? ZERO_INDEX_SIGNALS,
+  })
 }
 
 export default async function GamePage({ params }: Props) {
@@ -55,7 +72,10 @@ export default async function GamePage({ params }: Props) {
   return (
     <main id="main">
       <div className="page-head">
-        <h1>{game.name}</h1>
+        <div className="page-head-title">
+          <GameThumb slug={game.slug} size="header" />
+          <h1>{game.name}</h1>
+        </div>
         {game.aliases.length > 0 && <p className="meta">Also searched as {game.aliases.join(', ')}</p>}
         <div className="page-actions">
           <Link href={submitHref}>Submit a test for {game.name}</Link>

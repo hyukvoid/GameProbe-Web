@@ -5,6 +5,9 @@ for (const path of [
   '/',
   '/games/wuthering-waves',
   '/games/wuthering-waves/8bitdo-ultimate-2',
+  // Thumbnail pages: the header tile must not widen the layout on a phone.
+  '/games/genshin-impact',
+  '/games/zenless-zone-zero/sony-dualsense',
   '/submit',
   '/search?q=8bitdo',
   '/search?q=Genshin%20DualSense',

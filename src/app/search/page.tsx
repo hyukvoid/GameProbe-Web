@@ -1,11 +1,14 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { DirectTestRecord } from '@/components/evidence'
+import { GameThumb } from '@/components/game-thumb'
 import { CombinationResult, CompatibilityByGame } from '@/components/search'
 import { listGames, search } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
+import { searchMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = { title: 'Search' }
+// Navigation for people, not a canonical landing page: noindex, but the result links
+// stay followable. The index policy lives only in this metadata, never in the page body.
+export const metadata = searchMetadata
 
 type Props = { searchParams: Promise<{ q?: string | string[] }> }
 
@@ -60,7 +63,10 @@ export default async function SearchPage({ searchParams }: Props) {
           <ul className="records">
             {results.games.map((g) => (
               <li key={g.id} className="empty">
-                <Link href={`/games/${g.slug}`}>{g.name}</Link>
+                <span className="thumb-line">
+                  <GameThumb slug={g.slug} />
+                  <Link href={`/games/${g.slug}`}>{g.name}</Link>
+                </span>
               </li>
             ))}
           </ul>

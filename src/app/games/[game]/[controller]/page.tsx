@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ConnectionCompatibility, PhysicalControls } from '@/components/compatibility'
 import { DirectTestRecord, ExternalReportRecord } from '@/components/evidence'
+import { GameThumb } from '@/components/game-thumb'
 import { deriveCompatibility } from '@/lib/compatibility'
 import {
   getFamilyBySlug,
@@ -15,6 +16,13 @@ import {
 } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
 import { formatDate, plural } from '@/lib/format'
+import {
+  combinationMetadata,
+  indexRobots,
+  indexabilityOverview,
+  ZERO_INDEX_SIGNALS,
+} from '@/lib/seo'
+import { siteOrigin } from '@/lib/site'
 
 type Props = { params: Promise<{ game: string; controller: string }> }
 
@@ -29,8 +37,18 @@ async function load(params: Props['params']) {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { game, family } = await load(params)
-  return { title: game && family ? `${family.name} in ${game.name}` : 'Not found' }
+  const { sql, game, family } = await load(params)
+  if (!game || !family) return { title: 'Not found', robots: indexRobots(false) }
+  // Same shape as the game page: the game/family lookup wave first, then one aggregate on
+  // its own, so metadata never raises the number of queries in flight during a render.
+  // The page below answers 200 either way; noindex only omits it from the index.
+  const overview = await indexabilityOverview(sql, includeDemoData())
+  return combinationMetadata({
+    origin: await siteOrigin(),
+    game,
+    family,
+    signals: overview.combinations.get(`${game.id}|${family.id}`) ?? ZERO_INDEX_SIGNALS,
+  })
 }
 
 export default async function CombinationPage({ params }: Props) {
@@ -74,9 +92,12 @@ export default async function CombinationPage({ params }: Props) {
         <p className="crumbs">
           <Link href={`/games/${game.slug}`}>{game.name}</Link> / {family.name}
         </p>
-        <h1>
-          {family.name} in {game.name}
-        </h1>
+        <div className="page-head-title">
+          <GameThumb slug={game.slug} />
+          <h1>
+            {family.name} in {game.name}
+          </h1>
+        </div>
         <p className="meta">
           {plural(tests.length, 'direct test')}, {plural(sources, 'external source')}
           {last && <>. Last report {formatDate(last)}</>}

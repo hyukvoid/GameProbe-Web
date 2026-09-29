@@ -15,7 +15,7 @@ const plex = IBM_Plex_Sans({
 export const metadata: Metadata = {
   title: { default: 'GameProbe', template: '%s · GameProbe' },
   description:
-    'Android game controller compatibility: direct user tests and reviewed external reports for Wuthering Waves, Genshin Impact and Honkai: Star Rail.',
+    'Android game controller compatibility reference: reviewed external reports and direct tests, with connection-level results for each controller.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

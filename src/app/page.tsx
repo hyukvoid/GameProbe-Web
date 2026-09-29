@@ -1,5 +1,7 @@
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import { DirectTestRecord, EmptyTests, ExternalReportRecord } from '@/components/evidence'
+import { GameThumb } from '@/components/game-thumb'
 import { IssueTable } from '@/components/issues'
 import {
   combine,
@@ -14,6 +16,18 @@ import {
 } from '@/lib/data/public'
 import { includeDemoData, requestDb } from '@/lib/db'
 import { formatDate, plural } from '@/lib/format'
+import { indexRobots } from '@/lib/seo'
+import { siteOrigin } from '@/lib/site'
+
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: { absolute: 'GameProbe — Android controller compatibility' },
+    description:
+      'Android controller support for Genshin Impact, Zenless Zone Zero, Wuthering Waves, Call of Duty: Mobile and more: reviewed controller evidence, reported issues and direct-test status.',
+    alternates: { canonical: await siteOrigin() },
+    robots: indexRobots(true),
+  }
+}
 
 export default async function Home() {
   const sql = await requestDb()
@@ -54,7 +68,10 @@ export default async function Home() {
             {overviews.map((g) => (
               <tr key={g.id}>
                 <td className="primary" data-label="Game">
-                  <Link href={`/games/${g.slug}`}>{g.name}</Link>
+                  <span className="thumb-line">
+                    <GameThumb slug={g.slug} />
+                    <Link href={`/games/${g.slug}`}>{g.name}</Link>
+                  </span>
                 </td>
                 <td className="num" data-label="Direct tests">{g.directTests}</td>
                 <td className="num" data-label="External reports">{g.externalReports}</td>
