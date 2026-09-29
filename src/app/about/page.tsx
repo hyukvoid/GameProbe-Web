@@ -80,9 +80,12 @@ export default function AboutPage() {
             logo comes from Blizzard’s official press center, credited to Blizzard Entertainment as that source
             requires. The large artwork on game pages comes from official press kits too: the Dead Cells key art is
             from Motion Twin’s press kit, credited to Motion Twin, and the Diablo Immortal key art comes from
-            Blizzard’s official press center, credited to Blizzard Entertainment. Game names, logos and trademarks
-            belong to their owners; they appear here only to identify the games this reference site covers, with no
-            endorsement implied.
+            Blizzard’s official press center, credited to Blizzard Entertainment. Every other large game-page image,
+            and the four small custom tiles used where no reusable third-party logo exists, are{' '}
+            <strong>GameProbe original visuals</strong>: abstract, game-associated geometry drawn for this site, with
+            no third-party game artwork, characters, logos or screenshots used in them. Game names, logos and
+            trademarks belong to their owners; they appear here only to identify the games this reference site
+            covers, with no endorsement implied.
           </p>
         </section>
       </div>

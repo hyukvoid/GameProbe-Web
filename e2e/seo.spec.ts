@@ -112,15 +112,40 @@ test('the game page header shows a header-sized tile', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Genshin Impact' })).toBeVisible()
 })
 
-test('game page artwork renders beside the text only where approved', async ({ page }) => {
+test('every game page renders one large artwork beside the text', async ({ page }) => {
+  // All 15 catalog games: one artwork region, text still primary, no shell elsewhere.
+  const slugs = [
+    'alien-isolation',
+    'brawlhalla',
+    'call-of-duty-mobile',
+    'dead-cells',
+    'diablo-immortal',
+    'fortnite',
+    'genshin-impact',
+    'grid-autosport',
+    'honkai-star-rail',
+    'minecraft',
+    'roblox',
+    'stardew-valley',
+    'terraria',
+    'wuthering-waves',
+    'zenless-zone-zero',
+  ]
+  for (const slug of slugs) {
+    await page.goto(`/games/${slug}`)
+    await expect(page.locator(`[data-game-artwork="${slug}"]`), `artwork missing on ${slug}`).toBeVisible()
+    await expect(page.locator('.game-head-text')).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(page.locator('[data-game-artwork]')).toHaveCount(1)
+  }
+
+  // Restrained region: ~340px wide, 16:9 inside the header's height budget.
   await page.goto('/games/dead-cells')
   const art = page.locator('[data-game-artwork="dead-cells"]')
-  await expect(art).toBeVisible()
   const img = art.locator('img')
   await expect
     .poll(() => img.evaluate((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0))
     .toBe(true)
-  // Restrained region: ~340px wide, 16:9 inside the header's height budget.
   const box = await art.boundingBox()
   expect(box!.width).toBeGreaterThan(300)
   expect(box!.width).toBeLessThanOrEqual(380)
@@ -128,11 +153,6 @@ test('game page artwork renders beside the text only where approved', async ({ p
   expect(box!.height).toBeLessThanOrEqual(220)
   await expect(page.getByRole('heading', { level: 1, name: 'Dead Cells' })).toBeVisible()
   await expect(page.locator('.game-head-text')).toBeVisible()
-  // A game without approved artwork has no shell, empty region, or placeholder hero.
-  await page.goto('/games/genshin-impact')
-  await expect(page.locator('[data-game-artwork]')).toHaveCount(0)
-  await expect(page.locator('.game-artwork')).toHaveCount(0)
-  await expect(page.getByRole('heading', { level: 1, name: 'Genshin Impact' })).toBeVisible()
 })
 
 test('a failed artwork request removes the region instead of breaking', async ({ page }) => {
@@ -157,7 +177,13 @@ test('a failed artwork request removes the region instead of breaking', async ({
 })
 
 test('no page shows a broken image', async ({ page }) => {
-  for (const path of ['/', '/search?q=dualsense', '/games/genshin-impact', '/games/zenless-zone-zero/sony-dualsense']) {
+  for (const path of [
+    '/',
+    '/search?q=dualsense',
+    '/games/genshin-impact',
+    '/games/terraria',
+    '/games/zenless-zone-zero/sony-dualsense',
+  ]) {
     await page.goto(path)
     const broken = await page.evaluate(
       () => [...document.images].filter((i) => !i.complete || i.naturalWidth === 0).length,

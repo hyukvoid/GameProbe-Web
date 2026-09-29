@@ -3,25 +3,46 @@
  * column and not a migration.
  *
  * Two distinct asset roles that are never interchangeable:
- * - `logo`: the small identifier (wordmark/logo) shown in list rows and page headers.
- * - `artwork`: one larger representative image shown only in the game-page header.
+ * - `logo`: the small identifier (licensed logo/wordmark or a GameProbe tile) shown in
+ *   list rows and page headers (48px lists, 128px headers).
+ * - `artwork`: the larger representative image shown only in the game-page header.
  * A logo is never treated as artwork: `gameArtworkPlan` reads only `artwork`, so a
  * wordmark can never be enlarged into a stand-in for game art.
  *
- * Rights policy: only commit an image whose reuse basis is documented here (press/media
- * kit asset, explicit license, or an asset this project owns). Everything else uses the
- * locally generated placeholder tile below - game initials on a neutral background, no
- * copied logos, characters or artwork. A placeholder is a finished state, not an error.
+ * All 15 catalog games carry both roles, so no current game normally renders the
+ * initials fallback; initials remain only as the runtime-failure fallback and as the
+ * generic fallback for unknown future games.
+ *
+ * Asset kinds:
+ * - `licensed-original`     official press/media-kit asset, used under the publisher's
+ *                           own press/editorial terms (sourceUrl required).
+ * - `licensed-third-party`  reusable identification asset from Wikimedia Commons with
+ *                           an explicit reusable license on its file page (sourceUrl
+ *                           required).
+ * - `gameprobe-original`    original visual drawn for this project: abstract,
+ *                           game-associated geometry only - no third-party game art,
+ *                           characters, logos or screenshots. sourceUrl is intentionally
+ *                           absent; the rightsNote states project ownership.
+ *
+ * Rights policy: only commit an image whose reuse basis is documented here, with the
+ * access date recorded. A second rights pass re-checked every missing game; where
+ * credible official/licensed sources were exhausted and rights stayed unclear, the
+ * game received a GameProbe original instead of an ambiguous third-party file.
  */
 
-/** One rights-cleared image with its own provenance; logo and artwork each carry their own. */
+/** Where an asset sits on the rights ladder; drives provenance and credit tests. */
+export type MediaAssetKind = 'licensed-original' | 'licensed-third-party' | 'gameprobe-original'
+
+/** One image with its own provenance; logo and artwork each carry their own record. */
 export type MediaAsset = {
   /** Local public path (`/...`, never remote). Remote URLs are never hotlinked. */
   src: string
+  /** Rights tier of this asset. */
+  kind: MediaAssetKind
   /** Descriptive alt text for the asset itself. */
   alt: string
-  /** The page the asset was taken from and where its reuse basis is stated. */
-  sourceUrl: string
+  /** The page the terms live on. Required for licensed kinds; absent for originals. */
+  sourceUrl?: string
   /** Why this asset may be used, including the date it was checked (YYYY-MM-DD). */
   rightsNote: string
   /** Optional object-position for a conservative crop within the frame. */
@@ -30,63 +51,83 @@ export type MediaAsset = {
 
 export type GameMedia = {
   slug: string
-  /** Small identification logo/wordmark for list rows and page headers (48/128px). */
-  logo?: MediaAsset
+  /** Small identification visual for list rows and page headers (48/128px). */
+  logo: MediaAsset
   /** Large representative artwork for the game-page header only (never in lists). */
-  artwork?: MediaAsset
-  /**
-   * Present when no logo asset exists: records why no third-party image is used and
-   * that the locally generated initials tile is rendered instead.
-   */
-  placeholderNote?: string
+  artwork: MediaAsset
 }
 
-/** Provenance for every placeholder tile; kept next to the metadata it describes. */
-const PLACEHOLDER_RIGHTS =
-  'Locally generated placeholder tile (game initials on a neutral background), created for this project. ' +
-  'No third-party artwork, logos or store thumbnails are used.'
+/** Provenance sentence for every GameProbe-owned original. */
+const GAMEPROBE_RIGHTS =
+  'Original visual created for GameProbe; no third-party game artwork, characters, logos or screenshots used.'
+
+/** GameProbe tiles additionally record why no third-party logo was used. */
+const GAMEPROBE_TILE_RIGHTS =
+  GAMEPROBE_RIGHTS +
+  ' Custom identification tile drawn for this project after a second rights review found no reusable third-party logo (2026-09-29).'
 
 /**
- * All 15 catalog games, in catalog-name order. A game has a `logo` only when a reuse
- * basis was established (official press asset, or a Wikimedia Commons file page with an
- * explicit reusable license); everything else keeps the placeholder tile. Every real
- * asset records where it came from (`sourceUrl`) and why it may be used (`rightsNote`).
+ * All 15 catalog games, in catalog-name order. Every entry has both a logo and an
+ * artwork. Licensed assets record where their terms live (`sourceUrl`) and why they may
+ * be used (`rightsNote`); GameProbe originals record project ownership instead.
  */
 export const GAME_MEDIA: readonly GameMedia[] = [
   {
     slug: 'alien-isolation',
     logo: {
       src: '/games/alien-isolation.webp',
+      kind: 'licensed-third-party',
       alt: 'Alien: Isolation',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Alien_Isolation_Logo.svg',
       rightsNote:
         'Alien: Isolation logo by Jesmar on Wikimedia Commons, licensed CC BY-SA 3.0 (the file page also tags it PD-textlogo); cropped and resized for a square tile and credited on the About page. Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/alien-isolation/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Alien: Isolation — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
     },
   },
   {
     slug: 'brawlhalla',
     logo: {
       src: '/games/brawlhalla.webp',
+      kind: 'licensed-third-party',
       alt: 'Brawlhalla',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Brawlhalla_Logo.png',
       rightsNote:
         'Brawlhalla logo (author: Blue Mammoth Games) on Wikimedia Commons, licensed CC BY-SA 4.0; trimmed and resized for a square tile and credited on the About page. Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/brawlhalla/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Brawlhalla — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
     },
   },
   {
     slug: 'call-of-duty-mobile',
     logo: {
       src: '/games/call-of-duty-mobile.webp',
+      kind: 'licensed-third-party',
       alt: 'Call of Duty: Mobile',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Call_of_Duty_Mobile_2023_logo.svg',
       rightsNote:
         'Call of Duty: Mobile logo from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality), traced from the official Call of Duty website; trademark of Activision, used only to identify the game. Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/call-of-duty-mobile/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Call of Duty: Mobile — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
     },
   },
   {
     slug: 'dead-cells',
     logo: {
       src: '/games/dead-cells.webp',
+      kind: 'licensed-original',
       alt: 'Dead Cells',
       sourceUrl: 'https://motiontwin.com/presskit/81',
       rightsNote:
@@ -94,6 +135,7 @@ export const GAME_MEDIA: readonly GameMedia[] = [
     },
     artwork: {
       src: '/games/dead-cells/artwork.webp',
+      kind: 'licensed-original',
       alt: 'Dead Cells official key art',
       sourceUrl: 'https://motiontwin.com/presskit/81',
       rightsNote:
@@ -104,6 +146,7 @@ export const GAME_MEDIA: readonly GameMedia[] = [
     slug: 'diablo-immortal',
     logo: {
       src: '/games/diablo-immortal.webp',
+      kind: 'licensed-original',
       alt: 'Diablo Immortal',
       sourceUrl: 'https://blizzard.gamespress.com/Diablo-Immortal',
       rightsNote:
@@ -111,6 +154,7 @@ export const GAME_MEDIA: readonly GameMedia[] = [
     },
     artwork: {
       src: '/games/diablo-immortal/artwork.webp',
+      kind: 'licensed-original',
       alt: 'Diablo Immortal official key art',
       sourceUrl: 'https://blizzard.gamespress.com/Diablo-Immortal-Launch-Press-Kit',
       rightsNote:
@@ -119,78 +163,188 @@ export const GAME_MEDIA: readonly GameMedia[] = [
   },
   {
     slug: 'fortnite',
-    placeholderNote: PLACEHOLDER_RIGHTS,
+    logo: {
+      src: '/games/fortnite.webp',
+      kind: 'licensed-third-party',
+      alt: 'Fortnite',
+      sourceUrl: 'https://commons.wikimedia.org/wiki/File:FortniteLogo.svg',
+      rightsNote:
+        'Fortnite wordmark from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality), traced from Epic Games’ own site; trademark of Epic Games, used only to identify the game (Epic’s fan-content policy restricts any other use). Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/fortnite/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Fortnite — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'genshin-impact',
     logo: {
       src: '/games/genshin-impact.webp',
+      kind: 'licensed-third-party',
       alt: 'Genshin Impact',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Genshin_Impact_wordmark.svg',
       rightsNote:
         'Genshin Impact wordmark from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of miHoYo/HoYoverse, used only to identify the game. Accessed 2026-09-29.',
     },
+    artwork: {
+      src: '/games/genshin-impact/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Genshin Impact — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'grid-autosport',
-    placeholderNote: PLACEHOLDER_RIGHTS,
+    logo: {
+      src: '/games/grid-autosport/gameprobe-tile.webp',
+      kind: 'gameprobe-original',
+      alt: 'GRID Autosport — GameProbe original tile',
+      rightsNote: GAMEPROBE_TILE_RIGHTS,
+    },
+    artwork: {
+      src: '/games/grid-autosport/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'GRID Autosport — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'honkai-star-rail',
-    placeholderNote: PLACEHOLDER_RIGHTS,
+    logo: {
+      src: '/games/honkai-star-rail/gameprobe-tile.webp',
+      kind: 'gameprobe-original',
+      alt: 'Honkai: Star Rail — GameProbe original tile',
+      rightsNote: GAMEPROBE_TILE_RIGHTS,
+    },
+    artwork: {
+      src: '/games/honkai-star-rail/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Honkai: Star Rail — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'minecraft',
     logo: {
       src: '/games/minecraft.webp',
+      kind: 'licensed-third-party',
       alt: 'Minecraft',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Minecraft_Logo-en.svg',
       rightsNote:
         'Minecraft logo (author: Mojang Studios, taken from Mojang’s published brand assets) on Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality in Sweden); trademark of Mojang/Microsoft, used only to identify the game. Accessed 2026-09-29.',
     },
+    artwork: {
+      src: '/games/minecraft/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Minecraft — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'roblox',
-    placeholderNote: PLACEHOLDER_RIGHTS,
+    logo: {
+      src: '/games/roblox.webp',
+      kind: 'licensed-third-party',
+      alt: 'Roblox',
+      sourceUrl: 'https://commons.wikimedia.org/wiki/File:Roblox_Logo_2022.svg',
+      rightsNote:
+        'Roblox wordmark (author: Roblox Corporation) from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of Roblox Corporation, used only to identify the game. Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/roblox/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Roblox — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'stardew-valley',
-    placeholderNote: PLACEHOLDER_RIGHTS,
+    logo: {
+      src: '/games/stardew-valley/gameprobe-tile.webp',
+      kind: 'gameprobe-original',
+      alt: 'Stardew Valley — GameProbe original tile',
+      rightsNote: GAMEPROBE_TILE_RIGHTS,
+    },
+    artwork: {
+      src: '/games/stardew-valley/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Stardew Valley — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'terraria',
-    placeholderNote: PLACEHOLDER_RIGHTS,
+    logo: {
+      src: '/games/terraria/gameprobe-tile.webp',
+      kind: 'gameprobe-original',
+      alt: 'Terraria — GameProbe original tile',
+      rightsNote: GAMEPROBE_TILE_RIGHTS,
+    },
+    artwork: {
+      src: '/games/terraria/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Terraria — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
+    },
   },
   {
     slug: 'wuthering-waves',
     logo: {
       src: '/games/wuthering-waves.webp',
+      kind: 'licensed-third-party',
       alt: 'Wuthering Waves',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Wuthering_Waves_logo.svg',
       rightsNote:
         'Wuthering Waves logo from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of Kuro Games, used only to identify the game. Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/wuthering-waves/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Wuthering Waves — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
     },
   },
   {
     slug: 'zenless-zone-zero',
     logo: {
       src: '/games/zenless-zone-zero.webp',
+      kind: 'licensed-third-party',
       alt: 'Zenless Zone Zero',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Zenless_Zone_Zero_wordmark.svg',
       rightsNote:
         'Zenless Zone Zero wordmark from Wikimedia Commons, public domain text logo (PD-textlogo: below the threshold of originality); trademark of miHoYo/HoYoverse, used only to identify the game. Accessed 2026-09-29.',
+    },
+    artwork: {
+      src: '/games/zenless-zone-zero/gameprobe-cover.webp',
+      kind: 'gameprobe-original',
+      alt: 'Zenless Zone Zero — GameProbe original visual',
+      rightsNote: GAMEPROBE_RIGHTS,
     },
   },
 ]
 
 const BY_SLUG = new Map(GAME_MEDIA.map((m) => [m.slug, m]))
 
+/** Generic fallback for an unknown future game: empty paths route to the initials tile. */
+function unknownMedia(slug: string): GameMedia {
+  const generic: MediaAsset = {
+    src: '',
+    kind: 'gameprobe-original',
+    alt: '',
+    rightsNote: 'No catalog entry: the locally generated initials tile is rendered instead.',
+  }
+  return { slug, logo: generic, artwork: generic }
+}
+
 /**
- * Media for a slug. An unknown slug still returns a bare entry, so a missing entry or a
- * missing asset can never break rendering.
+ * Media for a slug. An unknown slug still returns a bare entry with empty paths, so a
+ * missing entry can never break rendering: the small visual falls back to initials and
+ * no artwork region is planned at all.
  */
 export function gameMedia(slug: string): GameMedia {
-  return BY_SLUG.get(slug) ?? { slug }
+  return BY_SLUG.get(slug) ?? unknownMedia(slug)
 }
 
 /** Only a single-slash path may be rendered: remote URLs are never hotlinked. */
@@ -214,10 +368,11 @@ export type GameThumbPlan =
   | { kind: 'tile'; initials: string }
 
 /**
- * What to render for one game's small identifier. A logo image is used only when the
- * entry carries a non-empty *local* path (`/...`); a missing path, an empty path, a remote
- * URL (never hotlink third-party servers) or unknown metadata all fall back to the
- * placeholder tile. Nothing here can produce a broken image element.
+ * What to render for one game's small identifier. The image path is used only when the
+ * entry carries a non-empty *local* path (`/...`); a missing path, an empty path, a
+ * remote URL (never hotlink third-party servers) or unknown metadata all fall back to
+ * the initials tile - the runtime-failure and unknown-game fallback, never the normal
+ * state of a catalog game. Nothing here can produce a broken image element.
  */
 export function gameThumbPlan(media: GameMedia): GameThumbPlan {
   if (media.logo && isLocalPath(media.logo.src)) {
@@ -241,9 +396,9 @@ export type GameArtworkPlan = {
 /**
  * Large artwork for the game-page header, or null when there is none. Artwork is read
  * only from `media.artwork` - never inferred from the logo path - so a wordmark cannot
- * become fake key art. Missing metadata, an empty path, a missing alt or a remote URL
- * all yield null: the caller then renders no artwork region at all (the header collapses
- * to text) rather than a placeholder hero.
+ * become fake key art. An empty path, a missing alt or a remote URL all yield null: the
+ * caller then renders no artwork region at all (the header collapses to text) rather
+ * than a placeholder hero.
  */
 export function gameArtworkPlan(media: GameMedia): GameArtworkPlan | null {
   const art = media.artwork

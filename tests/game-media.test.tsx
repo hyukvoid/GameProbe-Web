@@ -3,10 +3,14 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-// Two asset roles, never interchangeable: a small logo identifier (list rows and page
-// headers) and one large artwork image (game-page header only). Provenance is enforced
-// per asset, artwork is never inferred from a logo, and a failure always removes media
-// without a broken image, a fake hero, or an empty shell.
+// Complete visual coverage, two roles and three rights tiers:
+// - every one of the 15 catalog games has a small visual (licensed logo, licensed
+//   identifying asset, or a GameProbe-original tile) and a large artwork;
+// - licensed assets keep sourceUrl + rightsNote, GameProbe originals state project
+//   ownership and have no remote dependency;
+// - initials survive only as the runtime-failure and unknown-game fallback;
+// - placement (artwork on game pages only), attribution and SEO/search/compatibility
+//   regressions all stay exactly where they were.
 
 vi.mock('next/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('next/server')>()
@@ -22,13 +26,14 @@ vi.mock('next/headers', async (importOriginal) => {
 })
 
 // Test hook: while true, every useState call reports the post-error state, so the
-// "failed load removes the region" branch of GameArtwork is assertable without a DOM.
-let simulateArtworkFailure = false
+// failure branches of GameArtwork (region unmounts) and GameThumb (initials tile)
+// are assertable without a DOM.
+let simulateImageFailure = false
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>()
   const passthrough = actual.useState as (initial?: unknown) => unknown
   const useState = ((initial?: unknown) =>
-    simulateArtworkFailure ? [true, () => {}] : passthrough(initial)) as typeof actual.useState
+    simulateImageFailure ? [true, () => {}] : passthrough(initial)) as typeof actual.useState
   return { ...actual, useState }
 })
 
@@ -47,7 +52,10 @@ import {
   ARTWORK_WIDTH,
   GAME_MEDIA,
   gameArtworkPlan,
+  gameMedia,
   gameThumbPlan,
+  type MediaAsset,
+  type MediaAssetKind,
 } from '@/lib/game-media'
 import { createTestDb, type TestDb } from './helpers/db'
 
@@ -64,77 +72,63 @@ afterAll(async () => {
   await testDb.close()
 })
 
-const logos = GAME_MEDIA.filter((m) => m.logo)
-const artworks = GAME_MEDIA.filter((m) => m.artwork)
 const registrySlugs = GAME_MEDIA.map((m) => m.slug).sort()
+const KINDS: MediaAssetKind[] = ['licensed-original', 'licensed-third-party', 'gameprobe-original']
 
-/** Every src recorded anywhere in the registry: logo and artwork alike. */
-function allAssetSrcs(): string[] {
-  return GAME_MEDIA.flatMap((m) => [m.logo?.src, m.artwork?.src]).filter((s): s is string => !!s)
+/** Every asset in the registry: logo and artwork of every game alike. */
+function allAssets(): { slug: string; role: 'logo' | 'artwork'; asset: MediaAsset }[] {
+  return GAME_MEDIA.flatMap((m) => [
+    { slug: m.slug, role: 'logo' as const, asset: m.logo },
+    { slug: m.slug, role: 'artwork' as const, asset: m.artwork },
+  ])
 }
 
-describe('game media: two-asset model', () => {
-  it('1. the model distinguishes logo from artwork and covers all 15 catalog games', async () => {
+/** Every src recorded anywhere in the registry. */
+function allAssetSrcs(): string[] {
+  return allAssets().map((a) => a.asset.src)
+}
+
+/** A fully valid test asset; override the fields a specific case needs. */
+function asset(src: string, extra: Partial<MediaAsset> = {}): MediaAsset {
+  return {
+    src,
+    kind: 'licensed-third-party',
+    alt: src ? 'Test visual' : '',
+    sourceUrl: src ? 'https://example.com/press' : undefined,
+    rightsNote: 'Test asset for planner checks. Accessed 2026-09-29.',
+    ...extra,
+  }
+}
+
+describe('visual coverage: 15 of 15', () => {
+  it('1. the current 15 games all have a small visual asset', async () => {
     const games = await testDb.sql<{ slug: string }[]>`select slug from games order by slug`
     expect(games).toHaveLength(15)
     expect(registrySlugs).toEqual(games.map((g) => g.slug))
-    expect(new Set(registrySlugs).size).toBe(registrySlugs.length)
-    // The two roles are separate optional fields with their own provenance records.
-    for (const media of GAME_MEDIA) {
-      if (media.logo) expect(media.logo, `bad logo asset for ${media.slug}`).toMatchObject({
-        src: expect.any(String),
-        alt: expect.any(String),
-        sourceUrl: expect.any(String),
-        rightsNote: expect.any(String),
-      })
-      if (media.artwork) expect(media.artwork, `bad artwork asset for ${media.slug}`).toMatchObject({
-        src: expect.any(String),
-        alt: expect.any(String),
-        sourceUrl: expect.any(String),
-        rightsNote: expect.any(String),
-      })
-      // An entry can never smuggle one asset into both roles.
-      if (media.logo && media.artwork) {
-        expect(media.artwork).not.toBe(media.logo)
-        expect(media.artwork.src).not.toBe(media.logo.src)
-      }
-      // A game without an image documents why, instead of being silently blank.
-      if (!media.logo) expect(media.placeholderNote, `missing placeholderNote for ${media.slug}`).toBeTruthy()
-    }
-    // The ambiguous "one image per game" shape is gone for good.
-    expect(GAME_MEDIA).not.toContainEqual(expect.objectContaining({ image: expect.anything() }))
-    expect(GAME_MEDIA).not.toContainEqual(expect.objectContaining({ kind: expect.anything() }))
-  })
+    expect(GAME_MEDIA).toHaveLength(15)
 
-  it('2. the nine accepted logos still render in their fixed boxes', async () => {
-    const expected = new Set([
-      'alien-isolation',
-      'brawlhalla',
-      'call-of-duty-mobile',
-      'dead-cells',
-      'diablo-immortal',
-      'genshin-impact',
-      'minecraft',
-      'wuthering-waves',
-      'zenless-zone-zero',
-    ])
-    expect(new Set(logos.map((m) => m.slug))).toEqual(expected)
-    for (const media of logos) {
-      const plan = gameThumbPlan(media)
-      expect(plan, `logo no longer renders for ${media.slug}`).toMatchObject({ kind: 'image' })
+    for (const media of GAME_MEDIA) {
+      const logo = media.logo
+      expect(logo, `missing logo for ${media.slug}`).toBeTruthy()
+      expect(logo.src, `bad logo path for ${media.slug}`).toMatch(/^\/games\/[a-z0-9-]+(\/[a-z0-9-]+)?\.webp$/)
+      expect(logo.alt, `missing logo alt for ${media.slug}`).toBeTruthy()
+      expect(logo.rightsNote.length, `empty rightsNote for ${media.slug}`).toBeGreaterThan(20)
+      expect(KINDS, `unknown kind for ${media.slug}`).toContain(logo.kind)
+      // A logo can never be smuggled into the artwork role via the same file.
+      expect(media.artwork.src, `logo reused as artwork for ${media.slug}`).not.toBe(logo.src)
+      // And it renders: image plan, image markup, fixed boxes intact.
+      expect(gameThumbPlan(media), `logo not planned for ${media.slug}`).toMatchObject({ kind: 'image' })
       const html = renderToStaticMarkup(<GameThumb slug={media.slug} />)
-      expect(html).toContain('data-thumb-kind="image"')
+      expect(html, `thumb not rendered for ${media.slug}`).toContain('data-thumb-kind="image"')
       expect(html).toContain(`data-game-thumb="${media.slug}"`)
       expect(html).toMatch(/<img[^>]+width="\d+"/)
       expect(html).toMatch(/<img[^>]+height="\d+"/)
     }
-    // Games without a logo keep the placeholder tile: a finished state, no <img> at all.
-    for (const media of GAME_MEDIA.filter((m) => !m.logo)) {
-      const html = renderToStaticMarkup(<GameThumb slug={media.slug} />)
-      expect(html).toContain('data-thumb-kind="tile"')
-      expect(html).not.toContain('<img')
-    }
-    expect(renderToStaticMarkup(<GameThumb slug="not-in-the-catalog" />)).toContain('data-thumb-kind="tile"')
+
+    // The ambiguous one-image-per-game and placeholder-note shapes are gone for good.
+    expect(JSON.stringify(GAME_MEDIA)).not.toContain('placeholderNote')
+    expect(GAME_MEDIA).not.toContainEqual(expect.objectContaining({ image: expect.anything() }))
+
     // The boxes themselves are unchanged CSS: 48px rows, 128px header (96px on small).
     const css = await readFile(path.join(process.cwd(), 'src', 'app', 'globals.css'), 'utf8')
     expect(css).toMatch(/\.game-thumb\s*\{[^}]*width:\s*48px;[^}]*height:\s*48px;/)
@@ -146,124 +140,238 @@ describe('game media: two-asset model', () => {
     )
   })
 
-  it('3. artwork is never inferred from a logo path', () => {
-    const logoOnly = {
-      slug: 'some-game',
-      logo: {
-        src: '/games/some-game.webp',
-        alt: 'Some Game',
-        sourceUrl: 'https://example.com/press',
-        rightsNote: 'Test asset for the logo-only case. Accessed 2026-09-29.',
-      },
-    }
-    // A logo alone never produces artwork, however valid the logo is.
-    expect(gameArtworkPlan(logoOnly)).toBeNull()
-    expect(gameThumbPlan(logoOnly)).toMatchObject({ kind: 'image' })
-    // Missing, empty, remote or alt-less artwork all refuse to render.
-    expect(gameArtworkPlan({ slug: 'x', artwork: { src: '', alt: 'A', sourceUrl: 'https://e.com', rightsNote: 'n' } })).toBeNull()
-    expect(
-      gameArtworkPlan({ slug: 'x', artwork: { src: 'https://cdn.example.com/a.webp', alt: 'A', sourceUrl: 'https://e.com', rightsNote: 'n' } }),
-    ).toBeNull()
-    expect(gameArtworkPlan({ slug: 'x', artwork: { src: '/games/x/artwork.webp', alt: '', sourceUrl: 'https://e.com', rightsNote: 'n' } })).toBeNull()
-    expect(gameArtworkPlan({ slug: 'unknown' })).toBeNull()
-    // A logo path is also never reachable as artwork in the shipped registry.
-    const logoSrcs = new Set(logos.map((m) => m.logo!.src))
-    for (const media of artworks) expect(logoSrcs.has(media.artwork!.src)).toBe(false)
-  })
+  it('2. the current 15 games all have a large artwork asset', () => {
+    expect(GAME_MEDIA).toHaveLength(15)
+    for (const media of GAME_MEDIA) {
+      const art = media.artwork
+      expect(art, `missing artwork for ${media.slug}`).toBeTruthy()
+      expect(art.src, `bad artwork path for ${media.slug}`).toMatch(/^\/games\/[a-z0-9-]+\/[a-z0-9-]+\.webp$/)
+      expect(art.alt, `missing artwork alt for ${media.slug}`).toBeTruthy()
+      expect(art.rightsNote.length, `empty rightsNote for ${media.slug}`).toBeGreaterThan(20)
+      expect(KINDS, `unknown kind for ${media.slug}`).toContain(art.kind)
 
-  it('4. GameArtwork renders when an approved artwork exists', () => {
-    expect(artworks.length, 'no artwork entries shipped').toBeGreaterThan(0)
-    for (const media of artworks) {
+      const plan = gameArtworkPlan(media)
+      expect(plan, `no artwork plan for ${media.slug}`).not.toBeNull()
+      expect(plan!.width).toBe(ARTWORK_WIDTH)
+      expect(plan!.height).toBe(ARTWORK_HEIGHT)
+
       const html = renderToStaticMarkup(<GameArtwork slug={media.slug} />)
       expect(html, `artwork region missing for ${media.slug}`).toContain(`data-game-artwork="${media.slug}"`)
-      // The asset flows through the local optimizer: the registry path appears encoded
-      // in the local src/srcSet, never as a remote URL.
-      expect(html).toContain(encodeURIComponent(media.artwork!.src))
-      expect(html).toContain(`alt="${media.artwork!.alt}"`)
+      expect(html).toContain(encodeURIComponent(art.src))
+      expect(html).toContain(`alt="${art.alt}"`)
       expect(html).toContain(`width="${ARTWORK_WIDTH}"`)
       expect(html).toContain(`height="${ARTWORK_HEIGHT}"`)
       expect(html).toContain('game-artwork-img')
     }
+    // Artwork is never inferred from a logo: no artwork reuses any logo file.
+    const logoSrcs = new Set(GAME_MEDIA.map((m) => m.logo.src))
+    for (const media of GAME_MEDIA) expect(logoSrcs.has(media.artwork.src)).toBe(false)
   })
 
-  it('5. GameArtwork renders nothing when artwork is absent', () => {
-    for (const media of GAME_MEDIA.filter((m) => !m.artwork)) {
-      const html = renderToStaticMarkup(<GameArtwork slug={media.slug} />)
-      expect(html, `unexpected artwork shell for ${media.slug}`).toBe('')
-      expect(html).not.toContain('game-artwork')
+  it('3. no current catalog game normally resolves to initials fallback', () => {
+    for (const media of GAME_MEDIA) {
+      expect(gameThumbPlan(media), `thumb plan regressed for ${media.slug}`).toEqual({
+        kind: 'image',
+        src: media.logo.src,
+        alt: media.logo.alt,
+      })
+      const html = renderToStaticMarkup(<GameThumb slug={media.slug} />)
+      expect(html, `initials rendered for ${media.slug}`).not.toContain('game-thumb-initials')
+      expect(html).toContain('data-thumb-kind="image"')
     }
-    // Unknown slugs and logo-only media never summon artwork either.
-    expect(renderToStaticMarkup(<GameArtwork slug="not-in-the-catalog" />)).toBe('')
+    // The initials fallback remains, but only where it belongs: unknown future games.
+    const unknown = renderToStaticMarkup(<GameThumb slug="not-in-the-catalog" />)
+    expect(unknown).toContain('data-thumb-kind="tile"')
+    expect(unknown).toContain('game-thumb-initials')
+    expect(gameThumbPlan(gameMedia('not-in-the-catalog')).kind).toBe('tile')
+    expect(gameArtworkPlan(gameMedia('not-in-the-catalog'))).toBeNull()
   })
 
-  it('6. GameArtwork disappears cleanly on a failed load', () => {
-    expect(renderToStaticMarkup(<GameArtwork slug={artworks[0]?.slug ?? 'x'} />)).toContain('data-game-artwork=')
-    // After an image error the component returns null: the region unmounts entirely,
-    // leaving no <img>, no broken icon, and no oversized substitute behind.
-    simulateArtworkFailure = true
+  it('4. runtime failure still falls back safely', () => {
+    // Planners refuse bad input without ever producing a broken element.
+    expect(
+      gameThumbPlan({
+        slug: 'x',
+        logo: asset('https://cdn.example.com/logo.webp'),
+        artwork: asset('/games/x/artwork.webp'),
+      }).kind,
+    ).toBe('tile')
+    expect(
+      gameArtworkPlan({
+        slug: 'x',
+        logo: asset('/games/x.webp'),
+        artwork: asset('https://cdn.example.com/artwork.webp'),
+      }),
+    ).toBeNull()
+    expect(gameArtworkPlan({ slug: 'x', logo: asset('/games/x.webp'), artwork: asset('') })).toBeNull()
+    expect(
+      gameArtworkPlan({
+        slug: 'x',
+        logo: asset('/games/x.webp'),
+        artwork: asset('/games/x/artwork.webp', { alt: '' }),
+      }),
+    ).toBeNull()
+
+    // Simulated image failure: thumbs revert to the initials tile, artwork unmounts.
+    simulateImageFailure = true
     try {
-      for (const media of artworks) {
-        const html = renderToStaticMarkup(<GameArtwork slug={media.slug} />)
-        expect(html).toBe('')
-        expect(html).not.toContain('<img')
+      for (const media of GAME_MEDIA) {
+        const thumb = renderToStaticMarkup(<GameThumb slug={media.slug} />)
+        expect(thumb, `failed thumb kept its image for ${media.slug}`).toContain('data-thumb-kind="tile"')
+        expect(thumb).toContain('game-thumb-initials')
+        expect(thumb).not.toContain('<img')
+        expect(renderToStaticMarkup(<GameArtwork slug={media.slug} />), `artwork shell left for ${media.slug}`).toBe('')
       }
     } finally {
-      simulateArtworkFailure = false
+      simulateImageFailure = false
+    }
+    // Once the failure clears, the approved artwork renders again.
+    expect(renderToStaticMarkup(<GameArtwork slug="dead-cells" />)).toContain('data-game-artwork="dead-cells"')
+  })
+
+  it('5. licensed assets retain sourceUrl + rightsNote', () => {
+    const licensed = allAssets().filter((a) => a.asset.kind !== 'gameprobe-original')
+    expect(licensed.length, 'no licensed assets shipped').toBeGreaterThan(0)
+    for (const { slug, role, asset: a } of licensed) {
+      expect(a.sourceUrl, `missing sourceUrl for ${slug} ${role}`).toMatch(/^https:\/\//)
+      expect(a.rightsNote.length, `empty rightsNote for ${slug} ${role}`).toBeGreaterThan(20)
+      expect(a.rightsNote, `no access date for ${slug} ${role}`).toMatch(/20\d\d-\d\d-\d\d/)
+    }
+    // Both official press-kit artworks keep their publisher terms and credits.
+    for (const slug of ['dead-cells', 'diablo-immortal']) {
+      const art = gameMedia(slug).artwork
+      expect(art.kind).toBe('licensed-original')
+      expect(art.sourceUrl).toMatch(/^https:\/\//)
+      expect(art.rightsNote).toMatch(/press/i)
     }
   })
-})
 
-describe('game page header', () => {
-  it('7. a game page with artwork contains logo + title + artwork', async () => {
-    const media = artworks[0]
-    expect(media, 'no artwork entry shipped').toBeTruthy()
-    const row = (await testDb.sql<{ name: string }[]>`select name from games where slug = ${media!.slug}`)[0]
-    const html = renderToStaticMarkup(await GamePage({ params: Promise.resolve({ game: media!.slug }) }))
-    expect(html).toContain('<h1>')
-    expect(html).toContain(row.name)
-    expect(html).toContain(`data-game-thumb="${media!.slug}"`)
-    expect(html).toContain(`data-game-artwork="${media!.slug}"`)
-    // Title block and artwork sit in the same header grid; text is a sibling, not on top.
-    expect(html).toContain('game-head')
-    expect(html).toContain('game-head-text')
+  it('6. GameProbe originals identify themselves in rightsNote', () => {
+    const originals = allAssets().filter((a) => a.asset.kind === 'gameprobe-original')
+    expect(originals.length, 'no GameProbe originals shipped').toBeGreaterThan(0)
+    for (const { slug, role, asset: a } of originals) {
+      expect(a.rightsNote, `original without self-identification: ${slug} ${role}`).toContain(
+        'Original visual created for GameProbe',
+      )
+      expect(a.rightsNote, `original without content disclaimer: ${slug} ${role}`).toContain(
+        'no third-party game artwork, characters, logos or screenshots used',
+      )
+    }
+    // The four games whose second-pass rights review found no reusable logo use tiles.
+    for (const slug of ['honkai-star-rail', 'grid-autosport', 'terraria', 'stardew-valley']) {
+      expect(gameMedia(slug).logo.kind, `${slug} should use a GameProbe tile`).toBe('gameprobe-original')
+      expect(gameMedia(slug).logo.rightsNote).toContain('no reusable third-party logo')
+    }
+    // The About page exposes the same provenance to readers.
+    const html = renderToStaticMarkup(AboutPage())
+    expect(html).toContain('GameProbe original visuals')
+    expect(html).toContain('no third-party game artwork, characters, logos or screenshots')
   })
 
-  it('8. a game page without artwork has no empty artwork shell', async () => {
-    const media = GAME_MEDIA.find((m) => !m.artwork)
-    expect(media, 'every game has artwork; the no-artwork layout is untested').toBeTruthy()
-    const row = (await testDb.sql<{ name: string }[]>`select name from games where slug = ${media!.slug}`)[0]
-    const html = renderToStaticMarkup(await GamePage({ params: Promise.resolve({ game: media!.slug }) }))
-    expect(html).toContain(`<h1>${row.name}</h1>`)
-    expect(html).toContain(`data-game-thumb="${media!.slug}"`)
-    // No shell, no empty region, no placeholder hero of any kind.
-    expect(html).not.toContain('data-game-artwork=')
-    expect(html).not.toContain('game-artwork')
-    expect(html).not.toMatch(/<img[^>]+game-artwork/)
+  it('7. GameProbe originals contain no remote dependency', () => {
+    for (const { slug, role, asset: a } of allAssets().filter((x) => x.asset.kind === 'gameprobe-original')) {
+      expect(a.src, `remote original: ${slug} ${role}`).toMatch(/^\/games\/[a-z0-9-]+\//)
+      expect(a.src).not.toMatch(/^\/\//)
+      expect(a.sourceUrl, `original with remote sourceUrl: ${slug} ${role}`).toBeUndefined()
+    }
+    // Nothing anywhere in the registry is hotlinked.
+    for (const src of allAssetSrcs()) {
+      expect(src.startsWith('/'), `remote media: ${src}`).toBe(true)
+      expect(src.startsWith('//'), `protocol-relative media: ${src}`).toBe(false)
+      expect(src).not.toMatch(/^https?:/)
+    }
+  })
+
+  it('8. all local files exist', async () => {
+    const sharp = (await import('sharp')).default
+    for (const { slug, role, asset: a } of allAssets()) {
+      const file = path.join(process.cwd(), 'public', a.src)
+      const info = await stat(file)
+      expect(info.isFile(), `not a file: ${file}`).toBe(true)
+      expect(info.size, `empty file: ${file}`).toBeGreaterThan(0)
+      const meta = await sharp(file).metadata()
+      expect(meta.format, `not webp: ${file}`).toBe('webp')
+      if (role === 'logo') {
+        // Every small visual is one consistent square format.
+        expect(meta.width, `wrong tile width: ${file}`).toBe(256)
+        expect(meta.height, `wrong tile height: ${file}`).toBe(256)
+      } else {
+        expect(meta.width, `wrong artwork width: ${file}`).toBe(ARTWORK_WIDTH)
+        expect(meta.height, `wrong artwork height: ${file}`).toBe(ARTWORK_HEIGHT)
+        expect(info.size, `oversized artwork: ${file}`).toBeLessThan(180_000)
+      }
+      expect(slug).toBeTruthy()
+    }
+  })
+
+  it('9. all artwork assets are local', () => {
+    for (const media of GAME_MEDIA) {
+      expect(media.artwork.src, `non-local artwork for ${media.slug}`).toMatch(
+        /^\/games\/[a-z0-9-]+\/[a-z0-9-]+\.webp$/,
+      )
+      expect(media.artwork.src).not.toMatch(/^https?:|^\/\//)
+      // Artwork provenance never leans on the logo's record.
+      expect(media.artwork.rightsNote).not.toBe(media.logo.rightsNote)
+    }
+    // Remote-looking metadata can never render: both planners refuse it.
+    expect(
+      gameThumbPlan({
+        slug: 'x',
+        logo: asset('//cdn.example.com/logo.webp'),
+        artwork: asset('/games/x/artwork.webp'),
+      }).kind,
+    ).toBe('tile')
+    expect(
+      gameArtworkPlan({
+        slug: 'x',
+        logo: asset('/games/x.webp'),
+        artwork: asset('//cdn.example.com/artwork.webp'),
+      }),
+    ).toBeNull()
   })
 })
 
-describe('artwork placement', () => {
-  it('9. the homepage shows logos only, never artwork', async () => {
+describe('placement', () => {
+  it('10. homepage renders all 15 visuals', async () => {
     const html = renderToStaticMarkup(await Home())
     const games = await testDb.sql<{ slug: string }[]>`select slug from games`
     const thumbs = html.match(/data-game-thumb="[^"]+"/g) ?? []
     expect(thumbs).toHaveLength(games.length)
-    expect(html).toContain('data-game-thumb="genshin-impact"')
+    expect(games).toHaveLength(15)
+    // Every row shows an image, not the initials fallback.
+    expect(html.match(/data-thumb-kind="image"/g) ?? []).toHaveLength(games.length)
+    for (const g of games) expect(html).toContain(`data-game-thumb="${g.slug}"`)
+    // Never the large artwork.
     expect(html).not.toContain('data-game-artwork=')
     expect(html).not.toContain('game-artwork')
   })
 
-  it('10. search results show logos only, never artwork', async () => {
-    const html = renderToStaticMarkup(
-      await SearchPage({ searchParams: Promise.resolve({ q: 'genshin' }) }),
-    )
+  it('11. search renders visual assets', async () => {
+    const html = renderToStaticMarkup(await SearchPage({ searchParams: Promise.resolve({ q: 'genshin' }) }))
     expect(html).toContain('data-game-thumb="genshin-impact"')
+    expect(html).toContain('data-thumb-kind="image"')
     expect(html).toContain('href="/games/genshin-impact"')
     expect(html).not.toContain('data-game-artwork=')
     expect(html).not.toContain('game-artwork')
   })
 
-  it('11. the combination page shows logos only, never artwork', async () => {
+  it('12. all 15 game pages render large artwork', async () => {
+    const names = new Map(
+      (await testDb.sql<{ slug: string; name: string }[]>`select slug, name from games`).map((g) => [g.slug, g.name]),
+    )
+    for (const media of GAME_MEDIA) {
+      const html = renderToStaticMarkup(await GamePage({ params: Promise.resolve({ game: media.slug }) }))
+      expect(html, `no artwork region for ${media.slug}`).toContain(`data-game-artwork="${media.slug}"`)
+      expect(html).toContain(`data-game-thumb="${media.slug}"`)
+      expect(html).toContain('game-head')
+      expect(html).toContain('game-head-text')
+      expect(html, `missing title for ${media.slug}`).toContain(names.get(media.slug)!)
+      // One image only: no carousel, hero or duplicate region.
+      expect((html.match(/data-game-artwork=/g) ?? []).length).toBe(1)
+    }
+  })
+
+  it('13. combo pages render no large artwork', async () => {
     const html = renderToStaticMarkup(
       await CombinationPage({
         params: Promise.resolve({ game: 'zenless-zone-zero', controller: 'sony-dualsense' }),
@@ -274,76 +382,58 @@ describe('artwork placement', () => {
     expect(html).not.toContain('data-game-artwork=')
     expect(html).not.toContain('game-artwork')
   })
+
+  it('14. no broken image icons', async () => {
+    // Server-rendered audit: every image element on every surface is local, routed
+    // through the image optimizer, and dimensioned - there is nothing to "break".
+    const pages: [string, string][] = [
+      ['home', renderToStaticMarkup(await Home())],
+      [
+        'search',
+        renderToStaticMarkup(await SearchPage({ searchParams: Promise.resolve({ q: 'genshin' }) })),
+      ],
+      ['game (licensed artwork)', renderToStaticMarkup(await GamePage({ params: Promise.resolve({ game: 'dead-cells' }) }))],
+      ['game (original artwork + tile)', renderToStaticMarkup(await GamePage({ params: Promise.resolve({ game: 'honkai-star-rail' }) }))],
+      ['game (original artwork)', renderToStaticMarkup(await GamePage({ params: Promise.resolve({ game: 'minecraft' }) }))],
+      ['combo', renderToStaticMarkup(await CombinationPage({ params: Promise.resolve({ game: 'zenless-zone-zero', controller: 'sony-dualsense' }) }))],
+    ]
+    for (const [label, html] of pages) {
+      const imgs = html.match(/<img[^>]*>/g) ?? []
+      expect(imgs.length, `no images at all on ${label}`).toBeGreaterThan(0)
+      for (const img of imgs) {
+        expect(img, `non-optimizer image on ${label}: ${img}`).toMatch(/src="\/_next\/image\?url=%2F/)
+        expect(img, `remote url on ${label}: ${img}`).not.toMatch(/url=https?/)
+        expect(img, `undimensioned image on ${label}: ${img}`).toMatch(/width="/)
+        expect(img, `undimensioned image on ${label}: ${img}`).toMatch(/height="/)
+      }
+    }
+    // Runtime behaviour (failed request removes/never shows an image) is covered by
+    // test 4 above and by the Playwright suite.
+  })
 })
 
-describe('artwork provenance and files', () => {
-  it('12. every artwork carries a local path, source URL and rights note', () => {
-    expect(artworks.length).toBeGreaterThan(0)
-    for (const media of artworks) {
-      const art = media.artwork!
-      expect(art.src, `bad artwork path for ${media.slug}`).toMatch(/^\/games\/[a-z0-9-]+\/artwork\.webp$/)
-      expect(art.sourceUrl, `missing sourceUrl for ${media.slug}`).toMatch(/^https:\/\//)
-      expect(art.rightsNote.length, `empty rightsNote for ${media.slug}`).toBeGreaterThan(20)
-      expect(art.rightsNote, `rightsNote without access date for ${media.slug}`).toMatch(/20\d\d-\d\d-\d\d/)
-      expect(art.alt, `missing alt for ${media.slug}`).toBeTruthy()
-    }
-    // Artwork provenance never leans on the logo's record.
-    for (const media of artworks) {
-      const logo = GAME_MEDIA.find((m) => m.slug === media.slug)?.logo
-      if (logo) expect(media.artwork!.rightsNote).not.toBe(logo.rightsNote)
-    }
-  })
-
-  it('13. every artwork file exists locally at the recorded size', async () => {
-    const sharp = (await import('sharp')).default
-    expect(artworks.length).toBeGreaterThan(0)
-    for (const media of artworks) {
-      const file = path.join(process.cwd(), 'public', media.artwork!.src)
-      const info = await stat(file)
-      expect(info.isFile(), `not a file: ${file}`).toBe(true)
-      expect(info.size, `empty file: ${file}`).toBeGreaterThan(0)
-      expect(info.size, `oversized artwork: ${file}`).toBeLessThan(180_000)
-      const meta = await sharp(file).metadata()
-      expect(meta.format, `not webp: ${file}`).toBe('webp')
-      expect(meta.width, `wrong width: ${file}`).toBe(ARTWORK_WIDTH)
-      expect(meta.height, `wrong height: ${file}`).toBe(ARTWORK_HEIGHT)
-    }
-  })
-
-  it('14. no media is ever hotlinked', () => {
-    for (const src of allAssetSrcs()) {
-      expect(src.startsWith('/'), `remote media: ${src}`).toBe(true)
-      expect(src.startsWith('//'), `protocol-relative media: ${src}`).toBe(false)
-      expect(src).not.toMatch(/^https?:/)
-    }
-    // Remote-looking metadata can never render either: both planners refuse it.
-    expect(gameThumbPlan({ slug: 'x', logo: { src: 'https://cdn.example.com/l.webp', alt: 'a', sourceUrl: 'https://e.com', rightsNote: 'n' } }).kind).toBe('tile')
-    expect(gameArtworkPlan({ slug: 'x', artwork: { src: '//cdn.example.com/a.webp', alt: 'a', sourceUrl: 'https://e.com', rightsNote: 'n' } })).toBeNull()
-  })
-
-  it('15. image attribution stays on the About page', async () => {
+describe('attribution and regressions', () => {
+  it('15. existing attribution remains', async () => {
     const html = renderToStaticMarkup(AboutPage())
     expect(html).toContain('Image credits')
     // The pre-existing logo credits are untouched.
     expect(html).toContain('https://creativecommons.org/licenses/by-sa/3.0/')
     expect(html).toContain('https://creativecommons.org/licenses/by-sa/4.0/')
     expect(html).toContain('Blizzard Entertainment')
+    expect(html).toContain('Motion Twin')
     expect(html).toMatch(/no endorsement implied/i)
     // Every asset whose rights note routes credit to the About page is actually named
     // there, so an attribution requirement can never be left unfulfilled.
     const names = new Map(
       (await testDb.sql<{ slug: string; name: string }[]>`select slug, name from games`).map((g) => [g.slug, g.name]),
     )
-    for (const media of GAME_MEDIA) {
-      const notes = [media.logo?.rightsNote, media.artwork?.rightsNote]
-      if (notes.some((n) => n && /credited on the About page/.test(n))) {
-        expect(html, `missing credit for ${media.slug}`).toContain(names.get(media.slug) ?? media.slug)
+    for (const { slug, asset: a } of allAssets()) {
+      if (/credited on the About page/.test(a.rightsNote)) {
+        expect(html, `missing credit for ${slug}`).toContain(names.get(slug) ?? slug)
       }
     }
   })
-})
 
-describe('regressions', () => {
   it('16. media wiring does not change indexability metadata', async () => {
     // Same expectations as before images existed: evidence decides, media never does.
     const weak = await gameMetadataFor({ params: Promise.resolve({ game: 'genshin-impact' }) })
@@ -358,7 +448,15 @@ describe('regressions', () => {
     expect(JSON.stringify(GAME_MEDIA)).not.toMatch(/noindex|robots/i)
   })
 
-  it('17. compatibility rendering on the game page is unchanged', async () => {
+  it('17. search regression unchanged', async () => {
+    const html = renderToStaticMarkup(await SearchPage({ searchParams: Promise.resolve({ q: 'genshin' }) }))
+    expect(html).toContain('href="/games/genshin-impact"')
+    expect(html).toContain('data-game-thumb="genshin-impact"')
+    // Rows are still links first: media never replaces or hides the result.
+    expect(html).toMatch(/<a [^>]*href="\/games\/genshin-impact"[^>]*>Genshin Impact<\/a>/)
+  })
+
+  it('18. compatibility regression unchanged', async () => {
     const html = renderToStaticMarkup(
       await GamePage({ params: Promise.resolve({ game: 'zenless-zone-zero' }) }),
     )
@@ -367,15 +465,5 @@ describe('regressions', () => {
       expect(html, `missing column ${heading}`).toContain(heading)
     }
     expect(html).toContain('Submit a test')
-  })
-
-  it('18. search rendering is unchanged by media', async () => {
-    const html = renderToStaticMarkup(
-      await SearchPage({ searchParams: Promise.resolve({ q: 'genshin' }) }),
-    )
-    expect(html).toContain('href="/games/genshin-impact"')
-    expect(html).toContain('data-game-thumb="genshin-impact"')
-    // Rows are still links first: media never replaces or hides the result.
-    expect(html).toMatch(/<a [^>]*href="\/games\/genshin-impact"[^>]*>Genshin Impact<\/a>/)
   })
 })
